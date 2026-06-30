@@ -1,0 +1,34 @@
+# Example cube definitions — GENERIC, for documentation/demo only. The
+# `reporting` crate is domain-agnostic; a host supplies its own cubes (the
+# `spyglass-server` binary loads `./cubes`). Replace/remove for real use.
+cubes:
+  Events:
+    sql_table: events
+    title: Events
+    dimensions:
+      tenant_id:
+        type: string
+        sql: tenant_id
+        tenant: true # mandatory scope injected by the host
+      type:
+        type: string
+        sql: type
+      created_at:
+        type: time
+        sql: created_at
+    measures:
+      count:
+        type: count
+        title: Events
+
+  Orders:
+    sql_table: orders
+    title: Orders
+    dimensions:
+      tenant_id: { type: string, sql: tenant_id, tenant: true }
+      status: { type: string, sql: status }
+      created_at: { type: time, sql: created_at }
+    measures:
+      count: { type: count, title: Orders }
+      revenue: { type: sum, sql: amount_cents, title: Revenue }
+      avg_order: { type: avg, sql: amount_cents, title: Average order }

@@ -1,0 +1,166 @@
+//! Compiler tests — pure, no database. Lock the generated SQL + bound params
+//! and the mandatory scope injection.
+
+use spyglass::context::SecurityContext;
+use spyglass::model::{Cube, Dimension, DimensionType, Measure, MeasureType, Model};
+use spyglass::query::{Filter, FilterOperator, Order, Query, ScalarValue};
+use std::collections::BTreeMap;
+
+fn submissions_model() -> Model {
+    let mut dimensions = BTreeMap::new();
+    dimensions.insert(
+        "status".to_string(),
+        Dimension { dimension_type: DimensionType::String, sql: Some("status".into()), title: None, tenant: false },
+    );
+    dimensions.insert(
+        "workspace_id".to_string(),
+        Dimension { dimension_type: DimensionType::String, sql: Some("workspace_id".into()), title: None, tenant: true },
+    );
+    dimensions.insert(
+        "created_at".to_string(),
+        Dimension { dimension_type: DimensionType::Time, sql: Some("created_at".into()), title: None, tenant: false },
+    );
+
+    let mut measures = BTreeMap::new();
+    measures.insert(
+        "count".to_string(),
+        Measure { measure_type: MeasureType::Count, sql: None, title: None, format: None },
+    );
+    measures.insert(
+        "avg_score".to_string(),
+        Measure { measure_type: MeasureType::Avg, sql: Some("score_pct".into()), title: None, format: Some("percent".into()) },
+    );
+
+    let cube = Cube {
+        name: "Submissions".into(),
+        sql_table: Some("activity_submissions".into()),
+        sql: None,
+        title: None,
+        description: None,
+        measures,
+        dimensions,
+    };
+    let mut cubes = BTreeMap::new();
+    cubes.insert("Submissions".into(), cube);
+    Model { cubes }
+}
+
+#[test]
+fn compiles_group_by_with_scope() {
+    let model = submissions_model();
+    let query = Query {
+        measures: vec!["Submissions.count".into(), "Submissions.avg_score".into()],
+        dimensions: vec!["Submissions.status".into()],
+        filters: vec![Filter {
+            member: "Submissions.status".into(),
+            operator: FilterOperator::Equals,
+            values: vec![ScalarValue::String("graded".into())],
+        }],
+        time_dimensions: vec![],
+        order: vec![],
+        limit: Some(100),
+    };
+    let ctx = SecurityContext::default()
+        .with_scope("Submissions.workspace_id", ScalarValue::String("w1".into()));
+
+    let c = spyglass::compile(&model, &query, &ctx).expect("compiles");
+
+    let expected = "select status as \"Submissions.status\", count(*) as \"Submissions.count\", avg(score_pct)::float8 as \"Submissions.avg_score\"\n\
+from activity_submissions as \"Submissions\"\n\
+where status = $1 and workspace_id = $2\n\
+group by status\n\
+limit 100";
+    assert_eq!(c.sql, expected);
+    assert_eq!(
+        c.params,
+        vec![ScalarValue::String("graded".into()), ScalarValue::String("w1".into())]
+    );
+    assert_eq!(c.columns.len(), 3);
+}
+
+#[test]
+fn scope_is_always_injected_even_with_no_filters() {
+    let model = submissions_model();
+    let query = Query {
+        measures: vec!["Submissions.count".into()],
+        ..Default::default()
+    };
+    let ctx = SecurityContext::default()
+        .with_scope("Submissions.workspace_id", ScalarValue::String("w9".into()));
+    let c = spyglass::compile(&model, &query, &ctx).expect("compiles");
+    assert!(c.sql.contains("where workspace_id = $1"), "sql was: {}", c.sql);
+    assert_eq!(c.params, vec![ScalarValue::String("w9".into())]);
+}
+
+#[test]
+fn time_dimension_truncates_and_ranges() {
+    let model = submissions_model();
+    let query = Query {
+        measures: vec!["Submissions.count".into()],
+        time_dimensions: vec![spyglass::TimeDimension {
+            dimension: "Submissions.created_at".into(),
+            granularity: Some(spyglass::Granularity::Day),
+            date_range: Some(["2026-01-01".into(), "2026-02-01".into()]),
+        }],
+        order: vec![Order { member: "Submissions.created_at".into(), desc: false }],
+        ..Default::default()
+    };
+    let ctx = SecurityContext::default();
+    let c = spyglass::compile(&model, &query, &ctx).expect("compiles");
+    assert!(c.sql.contains("date_trunc('day', created_at)::text as \"Submissions.created_at\""), "{}", c.sql);
+    assert!(c.sql.contains("created_at >= $1"), "{}", c.sql);
+    assert!(c.sql.contains("created_at < $2"), "{}", c.sql);
+    assert!(c.sql.contains("order by \"Submissions.created_at\" asc"), "{}", c.sql);
+}
+
+#[test]
+fn rejects_filter_on_measure() {
+    let model = submissions_model();
+    let query = Query {
+        measures: vec!["Submissions.count".into()],
+        filters: vec![Filter {
+            member: "Submissions.count".into(),
+            operator: FilterOperator::Gt,
+            values: vec![ScalarValue::Int(5)],
+        }],
+        ..Default::default()
+    };
+    let err = spyglass::compile(&model, &query, &SecurityContext::default()).unwrap_err();
+    assert!(matches!(err, spyglass::CompileError::MeasureFilter(_)));
+}
+
+#[test]
+fn in_filter_expands_placeholders() {
+    let model = submissions_model();
+    let query = Query {
+        measures: vec!["Submissions.count".into()],
+        dimensions: vec!["Submissions.status".into()],
+        filters: vec![Filter {
+            member: "Submissions.status".into(),
+            operator: FilterOperator::In,
+            values: vec![ScalarValue::String("graded".into()), ScalarValue::String("submitted".into())],
+        }],
+        ..Default::default()
+    };
+    let c = spyglass::compile(&model, &query, &SecurityContext::default()).expect("compiles");
+    assert!(c.sql.contains("status in ($1, $2)"), "{}", c.sql);
+    assert_eq!(c.params.len(), 2);
+}
+
+#[test]
+fn parses_single_cube_yaml() {
+    let yaml = r#"
+name: Submissions
+sql_table: activity_submissions
+measures:
+  count:
+    type: count
+dimensions:
+  status:
+    type: string
+    sql: status
+"#;
+    let model = spyglass::loader::parse_str(yaml, "test.yml").expect("parses");
+    assert!(model.cube("Submissions").is_some());
+    assert_eq!(model.cubes.len(), 1);
+}

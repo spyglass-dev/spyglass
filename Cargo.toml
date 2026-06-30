@@ -1,0 +1,37 @@
+[package]
+name = "spyglass"
+version = "0.1.0"
+edition = "2021"
+description = "Spyglass — a pluggable semantic layer: Cube-style model, SQL compiler, single query endpoint. Postgres by default."
+license = "Apache-2.0"
+
+# The crate is designed to be lifted out of this repo and open-sourced as-is.
+# Engines are pluggable behind feature flags; `postgres` is the default.
+# `tls` (rustls) is on by default so the binary works against real databases;
+# embedders that bring their own client (e.g. zippy) opt out via
+# `default-features = false, features = ["postgres"]`.
+[features]
+default = ["postgres", "server", "tls"]
+postgres = ["dep:tokio-postgres", "dep:tokio"]
+server = ["dep:actix-web", "dep:tokio", "dep:env_logger", "dep:log"]
+tls = ["dep:rustls", "dep:tokio-postgres-rustls", "dep:webpki-roots"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+thiserror = "2.0"
+tokio-postgres = { version = "0.7", optional = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
+actix-web = { version = "4.9", optional = true }
+env_logger = { version = "0.11", optional = true }
+log = { version = "0.4", optional = true }
+# TLS (matches zippy's rustls setup: 0.23 + ring provider).
+rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
+tokio-postgres-rustls = { version = "0.12", optional = true }
+webpki-roots = { version = "0.26", optional = true }
+
+[[bin]]
+name = "spyglass-server"
+path = "src/bin/spyglass-server.rs"
+required-features = ["server", "postgres"]

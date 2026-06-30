@@ -1,0 +1,5 @@
+# Build artifacts — reporting is a self-contained tree.
+target/
+**/dist/
+**/node_modules/
+*.tsbuildinfo
