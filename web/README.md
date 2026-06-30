@@ -6,13 +6,16 @@ self-contained and ready to publish.
 
 ## Local development
 
+This package is part of the repo-root **pnpm workspace**. From the repo root:
+
 ```bash
-cd web
-pnpm install        # or npm install
-pnpm start          # dev server with hot reload at http://localhost:3000
-pnpm build          # static build into web/build
-pnpm serve          # serve the production build locally
+pnpm install        # install the whole workspace
+pnpm dev:docs       # docs dev server with hot reload at http://localhost:3000
+pnpm build:docs     # static build into web/build
 ```
+
+Or run the package's own scripts from this directory (`pnpm start`,
+`pnpm build`, `pnpm serve`).
 
 Add a Markdown file under `docs/` (with `sidebar_position` frontmatter) and it
 shows up in the sidebar automatically.

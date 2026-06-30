@@ -20,10 +20,16 @@ Install the `spyglass-server` binary with cargo:
 ```bash
 cargo install spyglass                       # from crates.io
 cargo install --git https://github.com/distri-ai/spyglass spyglass   # from git
+
+# from a local checkout (run in the repo root):
+cargo install --bin spyglass-server --path . --force --locked --debug
 ```
 
-This puts `spyglass-server` on your `PATH`, so the commands below can be run as
-`spyglass-server …` directly. To embed the **library** instead of the binary,
+The local-checkout form installs the `spyglass-server` binary from the current
+source tree — `--force` overwrites a previous install, `--locked` honors
+`Cargo.lock`, and `--debug` skips the optimized build for a faster install while
+iterating. This puts `spyglass-server` on your `PATH`, so the commands below can
+be run as `spyglass-server …` directly. To embed the **library** instead of the binary,
 add the crate as a dependency (see [Embedding the crate](#embedding-the-crate)).
 
 ## 1. Configure your environment

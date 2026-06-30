@@ -56,6 +56,9 @@ Install the `spyglass-server` binary with cargo:
 ```bash
 cargo install spyglass                       # from crates.io
 cargo install --git https://github.com/distri-ai/spyglass spyglass   # from git
+
+# from a local checkout (run in the repo root):
+cargo install --bin spyglass-server --path . --force --locked --debug
 ```
 
 This puts `spyglass-server` on your `PATH`. Bring-your-own-DB-client embedders
@@ -126,12 +129,22 @@ The agent skills ship in [`skills/`](./skills).
 ## Widgets & reports
 
 `@spyglass/ui` renders query results as **reports** — saveable, exportable docs
-of JSON widgets (`metric`, `table`, `chart`, `note`, `custom`). `@spyglass/studio`
-is a standalone editor. See [web/docs/widgets.md](./web/docs/widgets.md).
+of JSON widgets (`metric`, `table`, `chart`, `note`, `custom`), as embeddable
+React components. `@spyglass/studio` is the standalone editor that consumes
+them. See [web/docs/widgets.md](./web/docs/widgets.md).
+
+The JS packages (`ui`, `studio`, `web`) form a **pnpm workspace** rooted at the
+repo. Install once at the root, then use the workspace scripts. `pnpm dev` runs
+the studio app and consumes `@spyglass/ui` straight from source (live HMR, no
+build step); `pnpm storybook` develops the widgets in isolation:
 
 ```bash
-pnpm --filter @spyglass/ui build
-pnpm --filter @spyglass/ui test
+pnpm install            # install all workspace packages
+pnpm dev                # run the studio app (Vite) — picks up @spyglass/ui edits live
+pnpm storybook          # develop @spyglass/ui widgets in Storybook (HMR) at localhost:6006
+pnpm dev:docs           # run the docs site (Docusaurus) at localhost:3000
+pnpm build              # build every package (ui, studio, web)
+pnpm test               # @spyglass/ui tests
 ```
 
 ## Layout
@@ -143,9 +156,11 @@ spyglass/
   tests/              # cargo tests (pure compiler — no DB)
   examples/           # generic, domain-agnostic cube definitions
   skills/             # distri agent skills (querying + authoring reports)
-  ui/                 # @spyglass/ui — JSON-expressible widgets (React)
+  ui/                 # @spyglass/ui — embeddable JSON-expressible widgets (React) + Storybook
   studio/             # @spyglass/studio — standalone query/editor app
   web/                # Docusaurus docs site (docs in web/docs)
+  package.json        # pnpm workspace root (dev / build scripts)
+  pnpm-workspace.yaml # ui + studio + web
   .env.sample         # DATABASE_URL + server config
 ```
 
@@ -159,7 +174,7 @@ on GitHub) and is published as a Docusaurus site from [`web/`](./web). The
 deploys it to GitHub Pages on every push to `main`.
 
 ```bash
-cd web && pnpm install && pnpm start   # local docs at http://localhost:3000
+pnpm install && pnpm dev:docs   # local docs at http://localhost:3000
 ```
 
 ## License

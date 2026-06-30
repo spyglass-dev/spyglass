@@ -36,7 +36,10 @@ impl Model {
 /// One cube — a queryable entity backed by a base relation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cube {
-    /// Cube name (also the member prefix, e.g. `Submissions.count`).
+    /// Cube name (also the member prefix, e.g. `Submissions.count`). Under a
+    /// `cubes:` map it's backfilled from the map key by the loader, so cube
+    /// definitions don't repeat it; a single-cube file sets it explicitly.
+    #[serde(default)]
     pub name: String,
     /// Base table name. Exactly one of `sql_table` / `sql` should be set.
     #[serde(default, skip_serializing_if = "Option::is_none")]

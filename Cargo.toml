@@ -13,7 +13,7 @@ license = "Apache-2.0"
 [features]
 default = ["postgres", "server", "tls"]
 postgres = ["dep:tokio-postgres", "dep:tokio"]
-server = ["dep:actix-web", "dep:tokio", "dep:env_logger", "dep:log"]
+server = ["dep:actix-web", "dep:tokio", "dep:env_logger", "dep:log", "dep:time", "dep:dotenvy"]
 tls = ["dep:rustls", "dep:tokio-postgres-rustls", "dep:webpki-roots"]
 
 [dependencies]
@@ -26,10 +26,18 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = tr
 actix-web = { version = "4.9", optional = true }
 env_logger = { version = "0.11", optional = true }
 log = { version = "0.4", optional = true }
+# .env loading for the binary (matches zippy's dotenvy setup).
+dotenvy = { version = "0.15", optional = true }
 # TLS (matches zippy's rustls setup: 0.23 + ring provider).
 rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
 tokio-postgres-rustls = { version = "0.12", optional = true }
 webpki-roots = { version = "0.26", optional = true }
+# Pin transitive `time` to 0.3.41 ONLY under `server`: actix-web pulls
+# `cookie 0.16.2`, which fails to build against `time >= 0.3.52` (a sealed-trait
+# `parse` signature change). Gated behind the feature so embedders that don't
+# enable `server` (no actix) aren't forced onto 0.3.41 — letting their own
+# graph (e.g. sentry needing `time >= 0.3.47`) resolve freely.
+time = { version = "=0.3.41", optional = true }
 
 [[bin]]
 name = "spyglass-server"

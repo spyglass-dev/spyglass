@@ -28,21 +28,23 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
     steps:
       - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.1
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: pnpm
 
       - name: Install dependencies
-        run: npm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build site
-        run: npm run build
+        run: pnpm --filter @spyglass/web build
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

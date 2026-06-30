@@ -164,3 +164,57 @@ dimensions:
     assert!(model.cube("Submissions").is_some());
     assert_eq!(model.cubes.len(), 1);
 }
+
+#[test]
+fn cubes_map_backfills_name_from_key() {
+    // Under a `cubes:` map, each cube omits `name:` — the loader fills it from
+    // the map key (this is the documented format used by examples/ and docs/).
+    let yaml = r#"
+cubes:
+  Orders:
+    sql_table: orders
+    measures:
+      count:
+        type: count
+  Events:
+    sql_table: events
+    dimensions:
+      type:
+        type: string
+"#;
+    let model = spyglass::loader::parse_str(yaml, "test.yml").expect("parses");
+    assert_eq!(model.cubes.len(), 2);
+    assert_eq!(model.cube("Orders").expect("Orders").name, "Orders");
+    assert_eq!(model.cube("Events").expect("Events").name, "Events");
+}
+
+#[test]
+fn accepts_canonical_cube_list_form() {
+    // Cube's native YAML uses sequences with `name:` for cubes/dimensions/
+    // measures — the loader normalizes that to the map-form (what distri-
+    // generated cubes look like).
+    let yaml = r#"
+cubes:
+  - name: Orders
+    sql_table: orders
+    dimensions:
+      - name: workspace_id
+        sql: workspace_id
+        type: string
+        tenant: true
+      - name: status
+        sql: status
+        type: string
+    measures:
+      - name: count
+        type: count
+      - name: revenue
+        type: sum
+        sql: amount_cents
+"#;
+    let model = spyglass::loader::parse_str(yaml, "test.yml").expect("parses");
+    let orders = model.cube("Orders").expect("Orders");
+    assert_eq!(orders.name, "Orders");
+    assert_eq!(orders.measures.len(), 2);
+    assert!(orders.dimensions.get("workspace_id").expect("ws").tenant);
+}

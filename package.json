@@ -1,0 +1,20 @@
+{
+  "name": "@spyglass/workspace",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.11.1",
+  "description": "pnpm workspace for the Spyglass JS packages: @spyglass/ui, @spyglass/studio, @spyglass/web.",
+  "scripts": {
+    "dev": "pnpm --filter @spyglass/studio dev",
+    "dev:studio": "pnpm --filter @spyglass/studio dev",
+    "dev:docs": "pnpm --filter @spyglass/web start",
+    "storybook": "pnpm --filter @spyglass/ui storybook",
+    "build": "pnpm -r build",
+    "build:ui": "pnpm --filter @spyglass/ui build",
+    "build:studio": "pnpm --filter @spyglass/studio build",
+    "build:storybook": "pnpm --filter @spyglass/ui build-storybook",
+    "build:docs": "pnpm --filter @spyglass/web build",
+    "test": "pnpm --filter @spyglass/ui test",
+    "type-check": "pnpm -r --if-present type-check"
+  }
+}

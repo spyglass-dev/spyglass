@@ -30,7 +30,7 @@ spyglass/
   tests/              # cargo tests (pure compiler — no DB)
   examples/           # generic, domain-agnostic cube definitions
   skills/             # distri agent skills (querying + authoring reports)
-  ui/                 # @spyglass/ui — JSON-expressible widgets (React)
+  ui/                 # @spyglass/ui — embeddable JSON-expressible widgets (React) + Storybook
   studio/             # @spyglass/studio — standalone query/editor app
   web/                # Docusaurus docs site (docs live in web/docs)
 ```

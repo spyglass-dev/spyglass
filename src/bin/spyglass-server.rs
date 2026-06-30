@@ -13,13 +13,22 @@
 //!                `--source <path>` files/folders, as one JSON — everything a
 //!                distri-CLI agent needs to read the code AND the data and
 //!                author cube files.
+//!   - `validate` OFFLINE: load the cube directory (no DB) and report cubes /
+//!                measures / dimensions; non-zero exit if anything fails to
+//!                parse. For agents/CI to self-check generated cubes.
 //!
 //! Env: `DATABASE_URL` (required), `REPORTING_CUBES` (./cubes),
-//! `REPORTING_LOGS` (./logs), `REPORTING_ADDR` (127.0.0.1:8088).
+//! `REPORTING_LOGS` (./logs), `REPORTING_ADDR` (127.0.0.1:8088). These are
+//! read from the process environment and from a `.env` file (loaded via
+//! dotenvy after `-C`, so the working dir's `.env` is picked up).
+//!
+//! Global flag: `-C` / `--dir <path>` (docker-style) sets the working directory
+//! before running, so `./cubes`, `./logs`, and `--source` paths resolve inside
+//! it — e.g. `spyglass-server -C testing serve` loads `testing/cubes`.
 //!
 //! Examples:
 //!   spyglass-server schema > schema.json
-//!   spyglass-server analyze --profile --table activity_submissions
+//!   spyglass-server -C testing analyze --profile --table activity_submissions
 //!   spyglass-server analyze --profile --filter workspace_id=ws_123
 
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
@@ -269,20 +278,107 @@ async fn run_bundle(args: &[String]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Extract a global working-directory flag (`-C` / `--dir` / `--cwd <path>`,
+/// docker-style) from `args`, removing the flag and its value in place. All
+/// relative paths (`./cubes`, `./logs`, `--source …`) then resolve inside it.
+fn extract_workdir(args: &mut Vec<String>) -> Option<String> {
+    let mut dir = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-C" | "--dir" | "--cwd" => {
+                args.remove(i); // drop the flag
+                if i < args.len() {
+                    dir = Some(args.remove(i)); // take its value
+                }
+            }
+            other if other.starts_with("--dir=") || other.starts_with("--cwd=") => {
+                dir = other.split_once('=').map(|(_, v)| v.to_string());
+                args.remove(i);
+            }
+            _ => i += 1,
+        }
+    }
+    dir
+}
+
+/// OFFLINE: load the cube directory (no DB) and report what's in it. Exits
+/// non-zero if anything fails to parse — handy for agents/CI to self-check that
+/// generated cubes are well-formed.
+fn run_validate() {
+    let cubes_dir = std::env::var("REPORTING_CUBES").unwrap_or_else(|_| "./cubes".to_string());
+    let model = spyglass::loader::load_dir(&cubes_dir).unwrap_or_else(|e| {
+        eprintln!("INVALID: failed to load cubes from {cubes_dir}: {e}");
+        std::process::exit(1);
+    });
+    if model.cubes.is_empty() {
+        eprintln!("INVALID: no cubes found in {cubes_dir}");
+        std::process::exit(1);
+    }
+    println!("OK: {} cube(s) in {cubes_dir}", model.cubes.len());
+    for (name, cube) in &model.cubes {
+        let tenant = cube
+            .dimensions
+            .iter()
+            .find(|(_, d)| d.tenant)
+            .map(|(k, _)| k.as_str());
+        println!(
+            "  {name}: {} measure(s), {} dimension(s), tenant={}",
+            cube.measures.len(),
+            cube.dimensions.len(),
+            tenant.unwrap_or("(none!)"),
+        );
+    }
+    // A tenant-less cube is loadable but can't be safely scoped — warn loudly.
+    let untenanted: Vec<&String> = model
+        .cubes
+        .iter()
+        .filter(|(_, c)| !c.dimensions.values().any(|d| d.tenant))
+        .map(|(n, _)| n)
+        .collect();
+    if !untenanted.is_empty() {
+        eprintln!("WARNING: cube(s) without a tenant dimension: {untenanted:?}");
+    }
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init();
     // Install the rustls crypto provider once (ring), matching zippy.
     #[cfg(feature = "tls")]
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let args: Vec<String> = std::env::args().collect();
-    match args.get(1).map(|s| s.as_str()) {
+
+    let mut args: Vec<String> = std::env::args().collect();
+    args.remove(0); // drop the program name
+
+    // Docker-style working directory: `spyglass-server -C testing serve` loads
+    // cubes from `testing/cubes`, logs to `testing/logs`, etc.
+    if let Some(dir) = extract_workdir(&mut args) {
+        if let Err(e) = std::env::set_current_dir(&dir) {
+            eprintln!("failed to set working directory to '{dir}': {e}");
+            std::process::exit(1);
+        }
+        eprintln!("working directory: {dir}");
+    }
+
+    // Load `.env` (after `-C`, so the working dir's `.env` wins; dotenvy walks
+    // up to parent dirs too). Real environment variables still take precedence.
+    dotenvy::dotenv().ok();
+
+    match args.first().map(|s| s.as_str()) {
         Some("schema") => run_schema().await,
-        Some("analyze") => run_analyze(&args[2..]).await,
-        Some("bundle") => run_bundle(&args[2..]).await,
+        Some("analyze") => run_analyze(&args[1..]).await,
+        Some("bundle") => run_bundle(&args[1..]).await,
+        Some("validate") => {
+            run_validate();
+            Ok(())
+        }
         Some("serve") | None => serve().await,
         Some(other) => {
-            eprintln!("unknown subcommand '{other}'. Use: serve | schema | analyze | bundle");
+            eprintln!(
+                "unknown subcommand '{other}'. Use: serve | schema | analyze | bundle | validate"
+            );
+            eprintln!("global: -C/--dir <path>  set the working directory (docker-style)");
             std::process::exit(2);
         }
     }
