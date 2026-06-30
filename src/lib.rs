@@ -29,13 +29,17 @@ pub mod engine;
 pub mod introspect;
 pub mod loader;
 pub mod logging;
+pub mod meta;
 pub mod model;
 pub mod query;
+pub mod report;
 
 pub use compiler::{compile, CompileError, Compiled};
 pub use context::SecurityContext;
 pub use analyze::{AnalyzeFilter, AnalyzeOptions, ColumnProfile, DbProfile, TableProfile};
 pub use introspect::{ColumnDef, RawSchema, TableDef};
+pub use meta::{CubeMeta, DimensionMeta, MeasureMeta, ModelMeta};
+pub use report::{resolve_widget, BoundReport, BoundWidget, ChartHint};
 pub use logging::{analyze_log, analyze_lines, JsonFileExporter, QueryEvent, QueryExporter, UsageStats};
 pub use model::{Cube, Dimension, DimensionType, Measure, MeasureType, Model};
 pub use query::{

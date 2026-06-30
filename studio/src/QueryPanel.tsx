@@ -15,8 +15,11 @@ interface QueryResult {
 
 const STARTER_QUERY = JSON.stringify(
   {
-    query: { measures: ['Submissions.count'], dimensions: ['Submissions.status'] },
-    scope: { 'Submissions.workspace_id': 'demo-workspace' },
+    query: {
+      measures: ['ActivitySubmissions.count'],
+      dimensions: ['ActivitySubmissions.status'],
+    },
+    scope: { 'ActivitySubmissions.workspace_id': 'writeplace' },
   },
   null,
   2,
@@ -37,7 +40,7 @@ export function QueryPanel({
 }: {
   onAddWidget?: (spec: WidgetSpec) => void
 }) {
-  const [endpoint, setEndpoint] = useState('http://127.0.0.1:8088/query')
+  const [endpoint, setEndpoint] = useState('/api/query')
   const [body, setBody] = useState(STARTER_QUERY)
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)

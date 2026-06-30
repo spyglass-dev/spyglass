@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ReportView, type ReportDoc, type WidgetRegistry, type WidgetSpec } from '@spyglass/ui'
 import { reportsDb, type StoredReport } from './idb'
 import { QueryPanel } from './QueryPanel'
+import { server, scopeForWorkspace, type ReportSummary, type ModelMeta } from './server'
 
 const STARTER: ReportDoc = {
   title: 'New report',
@@ -31,6 +32,9 @@ export function App() {
   const [id, setId] = useState<string>(() => uid())
   const [text, setText] = useState<string>(() => JSON.stringify(STARTER, null, 2))
   const [list, setList] = useState<StoredReport[]>([])
+  const [serverReports, setServerReports] = useState<ReportSummary[]>([])
+  const [meta, setMeta] = useState<ModelMeta | null>(null)
+  const [workspace, setWorkspace] = useState<string>('writeplace')
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<'edit' | 'query'>('edit')
 
@@ -60,9 +64,26 @@ export function App() {
   }, [doc])
 
   const refreshList = () => reportsDb.list().then(setList)
+  const refreshServer = () =>
+    server.listReports().then(setServerReports).catch(() => setServerReports([]))
   useEffect(() => {
     void refreshList()
+    void refreshServer()
+    server.meta().then(setMeta).catch(() => setMeta(null))
   }, [])
+
+  // Run a server-side report (resolve its bound queries) for the chosen
+  // workspace and show the resulting data-bearing doc.
+  const loadServer = async (rid: string) => {
+    setError(null)
+    try {
+      const doc = await server.runReport(rid, scopeForWorkspace(meta, workspace))
+      setId(`srv:${rid}`)
+      setText(JSON.stringify(doc, null, 2))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
 
   const save = async () => {
     if (!doc) return
@@ -104,6 +125,19 @@ export function App() {
     <div style={{ fontFamily: 'system-ui, sans-serif', height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <header style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderBottom: '1px solid #e5e7eb' }}>
         <strong style={{ marginRight: 'auto' }}>Reporting Studio</strong>
+        <label style={{ fontSize: 12, color: '#6b7280', display: 'flex', alignItems: 'center', gap: 4 }}>
+          scope
+          <input
+            value={workspace}
+            onChange={(e) => setWorkspace(e.target.value)}
+            placeholder="workspace"
+            title="Tenant the server reports run as"
+            style={{ width: 130, fontSize: 12, padding: '2px 6px', border: '1px solid #e5e7eb', borderRadius: 6 }}
+          />
+        </label>
+        <button onClick={() => { void refreshServer(); if (id.startsWith('srv:')) void loadServer(id.slice(4)) }}>
+          Refresh
+        </button>
         <button onClick={newReport}>New</button>
         <button onClick={save} disabled={!doc}>Save</button>
         <button onClick={exportJson} disabled={!doc}>Export</button>
@@ -122,13 +156,34 @@ export function App() {
           <div style={{ display: 'flex', gap: 4, padding: 8, borderBottom: '1px solid #f1f5f9' }}>
             <button onClick={() => setTab('edit')} style={{ fontWeight: tab === 'edit' ? 700 : 400 }}>Edit</button>
             <button onClick={() => setTab('query')} style={{ fontWeight: tab === 'query' ? 700 : 400 }}>Query</button>
-            <select value={id} onChange={(e) => load(e.target.value)} style={{ marginLeft: 'auto' }}>
-              <option value={id}>— current ({id.slice(0, 16)}) —</option>
-              {list.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.doc.title || r.id}
-                </option>
-              ))}
+            <select
+              value={id}
+              onChange={(e) => {
+                const v = e.target.value
+                if (v.startsWith('srv:')) void loadServer(v.slice(4))
+                else void load(v)
+              }}
+              style={{ marginLeft: 'auto' }}
+            >
+              <option value={id}>— current ({id.slice(0, 20)}) —</option>
+              {serverReports.length > 0 && (
+                <optgroup label="Server reports (distri-built)">
+                  {serverReports.map((r) => (
+                    <option key={r.id} value={`srv:${r.id}`}>
+                      {r.title}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {list.length > 0 && (
+                <optgroup label="Local reports (IndexedDB)">
+                  {list.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.doc.title || r.id}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </div>
           {tab === 'edit' ? (

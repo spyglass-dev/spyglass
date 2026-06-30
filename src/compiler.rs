@@ -42,8 +42,11 @@ fn split_member(member: &str) -> Result<(&str, &str), CompileError> {
         .ok_or_else(|| CompileError::UnknownMember(member.to_string()))
 }
 
-/// Resolve which cube a query targets — every member must share it.
-fn resolve_cube_name(query: &Query, ctx: &SecurityContext) -> Result<String, CompileError> {
+/// Resolve which cube a query targets — every member must share it. The
+/// security scope is **not** considered here: it's a model-wide map keyed by
+/// `Cube.member` (one tenant key per cube), so the cube comes from the query's
+/// own members/filters, and only the scope entries for that cube are applied.
+fn resolve_cube_name(query: &Query) -> Result<String, CompileError> {
     let mut names: Vec<String> = Vec::new();
     let mut push = |m: &str| -> Result<(), CompileError> {
         let (cube, _) = split_member(m)?;
@@ -57,9 +60,6 @@ fn resolve_cube_name(query: &Query, ctx: &SecurityContext) -> Result<String, Com
     }
     for f in &query.filters {
         push(&f.member)?;
-    }
-    for m in ctx.scope.keys() {
-        push(m)?;
     }
     match names.len() {
         0 => Err(CompileError::Empty),
@@ -112,7 +112,7 @@ pub fn compile(
     query: &Query,
     ctx: &SecurityContext,
 ) -> Result<Compiled, CompileError> {
-    let cube_name = resolve_cube_name(query, ctx)?;
+    let cube_name = resolve_cube_name(query)?;
     let cube = model
         .cube(&cube_name)
         .ok_or_else(|| CompileError::UnknownCube(cube_name.clone()))?;
@@ -174,8 +174,17 @@ pub fn compile(
             where_parts.push(format!("{} < ${}", expr, params.len()));
         }
     }
-    // Mandatory scope filters — sorted for deterministic SQL.
-    let mut scope: Vec<(&String, &ScalarValue)> = ctx.scope.iter().collect();
+    // Mandatory scope filters — only the entries for THIS cube (the scope is a
+    // model-wide map keyed by `Cube.member`). Sorted for deterministic SQL.
+    let mut scope: Vec<(&String, &ScalarValue)> = ctx
+        .scope
+        .iter()
+        .filter(|(member, _)| {
+            split_member(member)
+                .map(|(c, _)| c == cube_name)
+                .unwrap_or(false)
+        })
+        .collect();
     scope.sort_by(|a, b| a.0.cmp(b.0));
     for (member, value) in scope {
         let (_, field) = split_member(member)?;

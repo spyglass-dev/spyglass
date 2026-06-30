@@ -47,6 +47,7 @@ use std::sync::Arc;
 struct AppState {
     model: Model,
     engine: PostgresEngine,
+    reports_dir: String,
 }
 
 #[derive(Deserialize)]
@@ -68,6 +69,177 @@ async fn query(state: web::Data<AppState>, body: web::Json<QueryBody>) -> impl R
 
 async fn health() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({ "ok": true }))
+}
+
+// ─── Catalog: metadata the UI/agents use to discover what's queryable ───────
+
+async fn meta(state: web::Data<AppState>) -> impl Responder {
+    HttpResponse::Ok().json(state.model.metadata())
+}
+
+/// GET /schema — raw DB schema (offline-ish; admin/UI introspection).
+async fn schema(state: web::Data<AppState>) -> impl Responder {
+    match state.engine.introspect().await {
+        Ok(s) => HttpResponse::Ok().json(s),
+        Err(e) => HttpResponse::BadRequest().json(serde_json::json!({ "error": e.to_string() })),
+    }
+}
+
+/// POST /analyze — data profile (row counts, cardinality, ranges, top values).
+/// Admin/UI path: heavy, read-only; body is `AnalyzeOptions`.
+async fn analyze(state: web::Data<AppState>, body: web::Json<AnalyzeOptions>) -> impl Responder {
+    let opts = body.into_inner();
+    match state.engine.analyze(&opts).await {
+        Ok(p) => HttpResponse::Ok().json(p),
+        Err(e) => HttpResponse::BadRequest().json(serde_json::json!({ "error": e.to_string() })),
+    }
+}
+
+// ─── Report builder: store + run bound reports ──────────────────────────────
+
+fn sanitize_id(id: &str) -> String {
+    id.chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .collect()
+}
+
+fn slugify(s: &str) -> String {
+    let mut out = String::new();
+    for c in s.chars() {
+        if c.is_alphanumeric() {
+            out.extend(c.to_lowercase());
+        } else if matches!(c, ' ' | '-' | '_') && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+fn report_path(dir: &str, id: &str) -> std::path::PathBuf {
+    std::path::Path::new(dir).join(format!("{}.json", sanitize_id(id)))
+}
+
+fn load_report(dir: &str, id: &str) -> Option<spyglass::report::BoundReport> {
+    let contents = std::fs::read_to_string(report_path(dir, id)).ok()?;
+    serde_json::from_str(&contents).ok()
+}
+
+/// GET /reports — list saved reports as `[{ id, title }]`.
+async fn reports_list(state: web::Data<AppState>) -> impl Responder {
+    let mut items: Vec<(String, String)> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&state.reports_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let id = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default()
+                .to_string();
+            let title = load_report(&state.reports_dir, &id)
+                .map(|r| r.title)
+                .unwrap_or_else(|| id.clone());
+            items.push((id, title));
+        }
+    }
+    items.sort();
+    let out: Vec<_> = items
+        .into_iter()
+        .map(|(id, title)| serde_json::json!({ "id": id, "title": title }))
+        .collect();
+    HttpResponse::Ok().json(out)
+}
+
+/// GET /reports/{id} — the bound report template.
+async fn report_get(state: web::Data<AppState>, id: web::Path<String>) -> impl Responder {
+    match load_report(&state.reports_dir, &id) {
+        Some(r) => HttpResponse::Ok().json(r),
+        None => HttpResponse::NotFound().json(serde_json::json!({ "error": "report not found" })),
+    }
+}
+
+/// POST /reports — save a bound report (id from `id` or slugified title).
+async fn report_save(
+    state: web::Data<AppState>,
+    body: web::Json<spyglass::report::BoundReport>,
+) -> impl Responder {
+    let mut report = body.into_inner();
+    let id = sanitize_id(&report.id.clone().unwrap_or_else(|| slugify(&report.title)));
+    if id.is_empty() {
+        return HttpResponse::BadRequest()
+            .json(serde_json::json!({ "error": "report needs an id or title" }));
+    }
+    report.id = Some(id.clone());
+    if let Err(e) = std::fs::create_dir_all(&state.reports_dir) {
+        return HttpResponse::InternalServerError()
+            .json(serde_json::json!({ "error": format!("mkdir {}: {e}", state.reports_dir) }));
+    }
+    match serde_json::to_string_pretty(&report) {
+        Ok(json) => match std::fs::write(report_path(&state.reports_dir, &id), json) {
+            Ok(()) => HttpResponse::Ok().json(serde_json::json!({ "id": id })),
+            Err(e) => HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "error": e.to_string() })),
+        },
+        Err(e) => {
+            HttpResponse::BadRequest().json(serde_json::json!({ "error": e.to_string() }))
+        }
+    }
+}
+
+#[derive(Deserialize, Default)]
+struct RunBody {
+    #[serde(default)]
+    scope: BTreeMap<String, ScalarValue>,
+}
+
+/// POST /reports/{id}/run — run each bound widget's query under the report's
+/// scope (plus any overrides) and return a data-bearing `ReportDoc`.
+async fn report_run(
+    state: web::Data<AppState>,
+    id: web::Path<String>,
+    body: Option<web::Json<RunBody>>,
+) -> impl Responder {
+    let report = match load_report(&state.reports_dir, &id) {
+        Some(r) => r,
+        None => {
+            return HttpResponse::NotFound()
+                .json(serde_json::json!({ "error": "report not found" }))
+        }
+    };
+    let mut scope = report.scope.clone();
+    if let Some(b) = body {
+        for (k, v) in b.into_inner().scope {
+            scope.insert(k, v);
+        }
+    }
+    let ctx = SecurityContext { scope };
+
+    let mut widgets = Vec::with_capacity(report.widgets.len());
+    for w in &report.widgets {
+        match &w.query {
+            Some(q) => match state.engine.run(&state.model, q, &ctx).await {
+                Ok(result) => widgets.push(spyglass::report::resolve_widget(w, Some(&result))),
+                // Keep the report renderable: surface the failure as a note.
+                Err(e) => widgets.push(serde_json::json!({
+                    "type": "note",
+                    "title": w.title,
+                    "w": w.w,
+                    "markdown": format!("⚠️ query failed: {e}"),
+                })),
+            },
+            None => widgets.push(spyglass::report::resolve_widget(w, None)),
+        }
+    }
+    HttpResponse::Ok().json(spyglass::report::report_doc(&report, widgets))
+}
+
+/// GET / — the embedded, zero-build explorer (cubes + query runner + reports).
+async fn explorer() -> impl Responder {
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(include_str!("explorer.html"))
 }
 
 fn database_url() -> String {
@@ -104,15 +276,34 @@ async fn serve() -> std::io::Result<()> {
         }
     };
 
-    let state = web::Data::new(AppState { model, engine });
+    let reports_dir = std::env::var("REPORTING_REPORTS").unwrap_or_else(|_| "./reports".to_string());
+    eprintln!("reports dir: {reports_dir}");
+
+    let state = web::Data::new(AppState {
+        model,
+        engine,
+        reports_dir,
+    });
     let addr = std::env::var("REPORTING_ADDR").unwrap_or_else(|_| "127.0.0.1:8088".to_string());
-    eprintln!("spyglass-server listening on {addr}");
+    eprintln!("spyglass-server listening on http://{addr}  (open it for the explorer UI)");
 
     HttpServer::new(move || {
         App::new()
             .app_data(state.clone())
+            // Permissive read CORS so a separate UI dev server can hit the
+            // catalog/reports APIs (POSTs from another origin should use a dev
+            // proxy; same-origin explorer needs none).
+            .wrap(actix_web::middleware::DefaultHeaders::new().add(("Access-Control-Allow-Origin", "*")))
+            .route("/", web::get().to(explorer))
             .route("/health", web::get().to(health))
+            .route("/meta", web::get().to(meta))
+            .route("/schema", web::get().to(schema))
+            .route("/analyze", web::post().to(analyze))
             .route("/query", web::post().to(query))
+            .route("/reports", web::get().to(reports_list))
+            .route("/reports", web::post().to(report_save))
+            .route("/reports/{id}", web::get().to(report_get))
+            .route("/reports/{id}/run", web::post().to(report_run))
     })
     .bind(&addr)?
     .run()

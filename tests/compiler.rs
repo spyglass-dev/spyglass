@@ -189,6 +189,40 @@ cubes:
 }
 
 #[test]
+fn scope_is_per_cube() {
+    // A model-wide scope keyed by Cube.member must NOT make a single-cube query
+    // "span multiple cubes", and only the queried cube's scope entry applies.
+    let yaml = r#"
+cubes:
+  Orders:
+    sql_table: orders
+    dimensions:
+      workspace_id: { type: string, sql: workspace_id, tenant: true }
+    measures:
+      count: { type: count }
+  Events:
+    sql_table: events
+    dimensions:
+      workspace_id: { type: string, sql: workspace_id, tenant: true }
+    measures:
+      count: { type: count }
+"#;
+    let model = spyglass::loader::parse_str(yaml, "test.yml").expect("parses");
+    let mut scope = BTreeMap::new();
+    scope.insert("Orders.workspace_id".to_string(), ScalarValue::String("w1".into()));
+    scope.insert("Events.workspace_id".to_string(), ScalarValue::String("w1".into()));
+    let ctx = SecurityContext { scope };
+    let query: Query = serde_json::from_value(serde_json::json!({
+        "measures": ["Orders.count"]
+    }))
+    .unwrap();
+    let c = spyglass::compile(&model, &query, &ctx).expect("compiles to one cube");
+    assert!(c.sql.contains("from orders"), "{}", c.sql);
+    // Exactly one scope param applied (Orders'), not both cubes'.
+    assert_eq!(c.params.len(), 1, "only this cube's scope applies: {}", c.sql);
+}
+
+#[test]
 fn accepts_canonical_cube_list_form() {
     // Cube's native YAML uses sequences with `name:` for cubes/dimensions/
     // measures — the loader normalizes that to the map-form (what distri-

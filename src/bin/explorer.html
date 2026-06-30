@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Spyglass Explorer</title>
+<style>
+  :root {
+    --bg: #0d1b22; --panel: #122530; --panel2: #16303d; --line: #1f4554;
+    --ink: #e7f1f5; --muted: #8fb0bd; --accent: #6fc3df; --accent2: #2991b5;
+    --good: #4cc38a; --warn: #e0b050; --mono: ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  header { display: flex; align-items: baseline; gap: 14px; padding: 16px 22px;
+    border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: .3px; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  header .sp { flex: 1; }
+  .tabs { display: flex; gap: 4px; padding: 0 22px; border-bottom: 1px solid var(--line);
+    background: var(--panel); }
+  .tabs button { background: none; border: none; color: var(--muted); padding: 10px 14px;
+    cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; }
+  .tabs button.active { color: var(--ink); border-bottom-color: var(--accent); }
+  main { padding: 20px 22px; max-width: 1200px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted);
+    margin: 0 0 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(300px,1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; }
+  .card h3 { margin: 0 0 2px; font-size: 15px; }
+  .card .tt { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+  .members { display: flex; flex-direction: column; gap: 4px; }
+  .mlabel { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--accent);
+    margin: 8px 0 2px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono);
+    font-size: 12px; background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 2px 8px; margin: 2px 4px 2px 0; cursor: default; }
+  .pill .ty { color: var(--muted); font-size: 10px; }
+  .pill.tenant { border-color: var(--accent2); }
+  .badge { font-size: 9px; text-transform: uppercase; background: var(--accent2); color: #04222c;
+    border-radius: 4px; padding: 1px 5px; font-weight: 700; letter-spacing: .4px; }
+  .builder { display: grid; grid-template-columns: 280px 1fr; gap: 18px; }
+  .builder .col { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  select, input, button.run { width: 100%; background: var(--panel2); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; font-size: 13px; }
+  label.chk { display: block; padding: 3px 0; font-family: var(--mono); font-size: 12px; cursor: pointer; }
+  label.chk input { width: auto; margin-right: 8px; }
+  button.run { cursor: pointer; background: var(--accent2); border-color: var(--accent2);
+    color: #04222c; font-weight: 600; margin-top: 10px; }
+  button.run:hover { background: var(--accent); }
+  .field { margin-bottom: 10px; }
+  .field > span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase;
+    letter-spacing: .5px; margin-bottom: 4px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  td { font-family: var(--mono); }
+  pre.sql { background: #0a141a; border: 1px solid var(--line); border-radius: 8px; padding: 12px;
+    overflow: auto; font-size: 12px; color: var(--muted); white-space: pre-wrap; }
+  .report { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+  .w { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .w.w1 { grid-column: span 1; } .w.w2 { grid-column: span 2; }
+  .w.w3 { grid-column: span 3; } .w.w4 { grid-column: span 4; }
+  .w .wt { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+  .metric .val { font-size: 30px; font-weight: 700; margin-top: 4px; }
+  .bar { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-family: var(--mono); font-size: 12px; }
+  .bar .lab { width: 120px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar .track { flex: 1; background: var(--panel2); border-radius: 4px; height: 14px; overflow: hidden; }
+  .bar .fill { background: var(--accent); height: 100%; }
+  .bar .num { width: 56px; text-align: right; }
+  .muted { color: var(--muted); }
+  .err { color: var(--warn); }
+  .reportlist button { text-align: left; margin-bottom: 6px; }
+  .row { display: flex; gap: 10px; align-items: end; margin-bottom: 14px; flex-wrap: wrap; }
+  .row .field { margin: 0; min-width: 180px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🔭 Spyglass</h1>
+  <span class="sub" id="summary">loading…</span>
+  <span class="sp"></span>
+  <span class="sub">scope <input id="scope" style="width:200px;display:inline-block"
+     placeholder="workspace_id e.g. writeplace" value="writeplace" /></span>
+</header>
+<div class="tabs">
+  <button data-tab="cubes" class="active">Cubes</button>
+  <button data-tab="query">Query</button>
+  <button data-tab="reports">Reports</button>
+</div>
+
+<main>
+  <section id="tab-cubes">
+    <h2>Cubes</h2>
+    <div class="grid" id="cubes"></div>
+  </section>
+
+  <section id="tab-query" class="hidden">
+    <h2>Query builder</h2>
+    <div class="builder">
+      <div class="col">
+        <div class="field"><span>Cube</span><select id="q-cube"></select></div>
+        <div class="mlabel">Measures</div><div id="q-measures"></div>
+        <div class="mlabel">Dimensions</div><div id="q-dimensions"></div>
+        <button class="run" id="q-run">Run query</button>
+      </div>
+      <div class="col">
+        <div id="q-result"><span class="muted">Pick measures/dimensions and run.</span></div>
+        <pre class="sql hidden" id="q-sql"></pre>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-reports" class="hidden">
+    <h2>Sample reports</h2>
+    <div class="row">
+      <div class="reportlist" id="report-list"></div>
+    </div>
+    <div id="report-view"><span class="muted">Pick a report to run it against the current scope.</span></div>
+  </section>
+</main>
+
+<script>
+const $ = (s, r=document) => r.querySelector(s);
+const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt!=null) e.textContent = txt; return e; };
+const scopeVal = () => $('#scope').value.trim();
+let META = { cubes: [] };
+
+async function jget(url) { const r = await fetch(url); if (!r.ok) throw new Error(await r.text()); return r.json(); }
+async function jpost(url, body) {
+  const r = await fetch(url, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body||{}) });
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
+}
+
+// ── Tabs ──
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  ['cubes','query','reports'].forEach(t => $('#tab-'+t).classList.toggle('hidden', t !== b.dataset.tab));
+  if (b.dataset.tab === 'reports') loadReports();
+});
+
+// ── Cubes tab ──
+function renderCubes() {
+  const wrap = $('#cubes'); wrap.innerHTML = '';
+  for (const c of META.cubes) {
+    const card = el('div','card');
+    card.append(el('h3', null, c.name));
+    if (c.title) card.append(el('div','tt', c.title));
+    const meas = el('div'); meas.append(el('div','mlabel','Measures'));
+    for (const m of c.measures) {
+      const p = el('span','pill'); p.append(document.createTextNode(m.name));
+      p.append(el('span','ty', m.type)); meas.append(p);
+    }
+    const dims = el('div'); dims.append(el('div','mlabel','Dimensions'));
+    for (const d of c.dimensions) {
+      const p = el('span','pill'+(d.tenant?' tenant':'')); p.append(document.createTextNode(d.name));
+      p.append(el('span','ty', d.type)); if (d.tenant) p.append(el('span','badge','tenant'));
+      dims.append(p);
+    }
+    card.append(meas, dims); wrap.append(card);
+  }
+}
+
+// ── Query tab ──
+function cubeByName(n) { return META.cubes.find(c => c.name === n); }
+function renderBuilder() {
+  const sel = $('#q-cube'); sel.innerHTML = '';
+  META.cubes.forEach(c => { const o = el('option',null,c.name); o.value = c.name; sel.append(o); });
+  sel.onchange = fillMembers; fillMembers();
+}
+function fillMembers() {
+  const c = cubeByName($('#q-cube').value); if (!c) return;
+  const mk = (host, items, kind) => {
+    host.innerHTML = '';
+    items.forEach(m => {
+      const l = el('label','chk'); const i = el('input'); i.type='checkbox'; i.value = m.member; i.dataset.kind = kind;
+      l.append(i, document.createTextNode(' '+m.name)); host.append(l);
+    });
+  };
+  mk($('#q-measures'), c.measures, 'measure');
+  mk($('#q-dimensions'), c.dimensions, 'dimension');
+}
+$('#q-run').onclick = async () => {
+  const cube = $('#q-cube').value;
+  const checked = (k) => [...document.querySelectorAll(`#q-${k} input:checked`)].map(i => i.value);
+  const measures = checked('measures'), dimensions = checked('dimensions');
+  if (!measures.length && !dimensions.length) { $('#q-result').innerHTML = '<span class="err">Pick at least one member.</span>'; return; }
+  const c = cubeByName(cube); const tenant = c.dimensions.find(d => d.tenant);
+  const scope = {}; if (tenant && scopeVal()) scope[tenant.member] = scopeVal();
+  try {
+    const res = await jpost('/query', { query: { measures, dimensions }, scope });
+    $('#q-result').innerHTML = ''; $('#q-result').append(resultTable(res));
+    if (res.sql) { $('#q-sql').textContent = res.sql; $('#q-sql').classList.remove('hidden'); }
+  } catch (e) { $('#q-result').innerHTML = '<span class="err">'+e.message+'</span>'; $('#q-sql').classList.add('hidden'); }
+};
+function resultTable(res) {
+  if (!res.rows || !res.rows.length) return el('span','muted','No rows.');
+  const t = el('table'); const thead = el('thead'); const tr = el('tr');
+  res.columns.forEach(c => tr.append(el('th', null, c.key))); thead.append(tr); t.append(thead);
+  const tb = el('tbody');
+  res.rows.forEach(row => { const r = el('tr'); res.columns.forEach(c => r.append(el('td', null, fmt(row[c.key])))); tb.append(r); });
+  t.append(tb); return t;
+}
+const fmt = v => v==null ? '∅' : (typeof v === 'number' ? (Number.isInteger(v)?v:v.toFixed(2)) : String(v));
+
+// ── Reports tab ──
+async function loadReports() {
+  const host = $('#report-list'); host.innerHTML = '<span class="muted">loading…</span>';
+  try {
+    const list = await jget('/reports');
+    host.innerHTML = '';
+    if (!list.length) { host.innerHTML = '<span class="muted">No reports yet. Generate them with the distri reporter agent.</span>'; return; }
+    list.forEach(r => { const b = el('button','run'); b.style.width='auto'; b.textContent = r.title; b.onclick = () => runReport(r.id); host.append(b); });
+  } catch (e) { host.innerHTML = '<span class="err">'+e.message+'</span>'; }
+}
+async function runReport(id) {
+  const view = $('#report-view'); view.innerHTML = '<span class="muted">running…</span>';
+  const scope = {}; // server applies the report's default scope; override workspace if entered
+  try {
+    const doc = await jpost('/reports/'+id+'/run', scopeVal() ? { scope: scopeForReport(id) } : {});
+    renderReport(doc);
+  } catch (e) { view.innerHTML = '<span class="err">'+e.message+'</span>'; }
+}
+// Best-effort: override every cube's tenant member in scope with the header value.
+function scopeForReport() {
+  const s = {}; const v = scopeVal(); if (!v) return s;
+  META.cubes.forEach(c => { const t = c.dimensions.find(d => d.tenant); if (t) s[t.member] = v; });
+  return s;
+}
+function renderReport(doc) {
+  const view = $('#report-view'); view.innerHTML = '';
+  if (doc.title) { const h = el('h2', null, doc.title); h.style.color='var(--ink)'; view.append(h); }
+  if (doc.description) view.append(el('p','muted', doc.description));
+  const grid = el('div','report');
+  (doc.widgets||[]).forEach(w => grid.append(widgetEl(w)));
+  view.append(grid);
+}
+function widgetEl(w) {
+  const box = el('div','w w'+(w.w||4));
+  if (w.title) box.append(el('div','wt', w.title));
+  if (w.type === 'metric') {
+    const v = el('div','val', formatVal(w.value, w.format)); box.classList.add('metric'); box.append(v);
+    if (w.label) box.append(el('div','muted', w.label));
+  } else if (w.type === 'table') {
+    box.append(resultTableFromSpec(w));
+  } else if (w.type === 'chart') {
+    box.append(chartEl(w.chart));
+  } else if (w.type === 'note') {
+    const n = el('div', w.markdown && w.markdown.startsWith('⚠️') ? 'err' : null);
+    n.textContent = w.markdown || ''; box.append(n);
+  }
+  return box;
+}
+function resultTableFromSpec(w) {
+  if (!w.rows || !w.rows.length) return el('span','muted','No rows.');
+  const t = el('table'); const tr = el('tr');
+  w.columns.forEach(c => tr.append(el('th', null, c.label || c.key))); const th = el('thead'); th.append(tr); t.append(th);
+  const tb = el('tbody');
+  w.rows.forEach(row => { const r = el('tr'); w.columns.forEach(c => r.append(el('td', null, fmt(row[c.key])))); tb.append(r); });
+  t.append(tb); return t;
+}
+function chartEl(chart) {
+  const wrap = el('div'); if (!chart || !chart.series) return wrap;
+  const y = chart.y, x = chart.x; const max = Math.max(1, ...chart.series.map(s => Number(s[y])||0));
+  chart.series.forEach(s => {
+    const row = el('div','bar');
+    row.append(el('div','lab', String(s[x] ?? '')));
+    const track = el('div','track'); const fill = el('div','fill'); fill.style.width = ((Number(s[y])||0)/max*100)+'%';
+    track.append(fill); row.append(track); row.append(el('div','num', fmt(s[y])));
+    wrap.append(row);
+  });
+  return wrap;
+}
+function formatVal(v, f) {
+  if (typeof v === 'string') return v;
+  if (f === 'percent') return Math.round(v)+'%';
+  if (f === 'number') return v.toLocaleString();
+  return String(v);
+}
+
+// ── Boot ──
+(async () => {
+  try {
+    META = await jget('/meta');
+    const nm = META.cubes.reduce((a,c)=>a+c.measures.length,0);
+    const nd = META.cubes.reduce((a,c)=>a+c.dimensions.length,0);
+    $('#summary').textContent = `${META.cubes.length} cubes · ${nm} measures · ${nd} dimensions`;
+    renderCubes(); renderBuilder();
+  } catch (e) { $('#summary').textContent = 'failed to load /meta: ' + e.message; }
+})();
+</script>
+</body>
+</html>
