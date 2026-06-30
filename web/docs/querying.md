@@ -1,7 +1,7 @@
 ---
 id: querying
 title: Querying
-sidebar_position: 5
+sidebar_position: 6
 ---
 
 # Querying
@@ -65,6 +65,26 @@ The `scope` object pins the **security context**. Every dimension marked
 guarantee. In an embedded deployment the host builds the `SecurityContext`
 server-side from the authenticated session, so the tenant value never comes from
 the caller.
+
+## Server endpoints
+
+`spyglass-server serve` exposes a small HTTP surface:
+
+| Method & path | Purpose |
+|---------------|---------|
+| `GET /` | The embedded explorer UI (cubes + query runner + reports). |
+| `GET /health` | `{ "ok": true }`. |
+| `GET /meta` | The **catalog** — cubes with their measures/dimensions (`Cube.member` names, types, tenant flags) and no SQL. What a UI uses to build queries. |
+| `POST /query` | Run a query (above). |
+| `POST /analyze` | Profile the data — see [Analyzing your data](./analyze.md). |
+| `GET /schema` | Raw DB schema (admin/introspection). |
+| `GET /reports` · `POST /reports` | List / save bound reports. |
+| `GET /reports/{id}` | A saved report template. |
+| `POST /reports/{id}/run` | Run a report's bound queries under a scope → a data-bearing [`ReportDoc`](./widgets.md). |
+
+`spyglass-server validate` (no server, no DB) loads the cube directory and
+reports cubes/measures/dimensions — for CI or an agent self-checking generated
+cubes.
 
 ## Compiler guarantees
 

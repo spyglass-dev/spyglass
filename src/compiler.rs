@@ -107,6 +107,24 @@ fn quote(alias: &str) -> String {
     format!("\"{}\"", alias.replace('"', "\"\""))
 }
 
+/// Cast appended to a bind placeholder. The engine binds every parameter as
+/// **text** (so tokio-postgres never mis-infers an `int4`/`timestamptz` column
+/// from an `i64`/`String` value); this casts it back to the column's type.
+/// Text columns need no cast.
+fn cast_for(dim_type: DimensionType) -> &'static str {
+    match dim_type {
+        DimensionType::String => "",
+        DimensionType::Number => "::numeric",
+        DimensionType::Time => "::timestamptz",
+        DimensionType::Boolean => "::boolean",
+    }
+}
+
+/// A bind placeholder (`$n`) with the type cast for `dim_type`.
+fn placeholder(idx: usize, dim_type: DimensionType) -> String {
+    format!("${}{}", idx, cast_for(dim_type))
+}
+
 pub fn compile(
     model: &Model,
     query: &Query,
@@ -167,11 +185,11 @@ pub fn compile(
     for td in &query.time_dimensions {
         if let Some([from, to]) = &td.date_range {
             let (_, field) = split_member(&td.dimension)?;
-            let (expr, _) = dimension_expr(cube, field)?;
+            let (expr, dt) = dimension_expr(cube, field)?;
             params.push(ScalarValue::String(from.clone()));
-            where_parts.push(format!("{} >= ${}", expr, params.len()));
+            where_parts.push(format!("{} >= {}", expr, placeholder(params.len(), dt)));
             params.push(ScalarValue::String(to.clone()));
-            where_parts.push(format!("{} < ${}", expr, params.len()));
+            where_parts.push(format!("{} < {}", expr, placeholder(params.len(), dt)));
         }
     }
     // Mandatory scope filters — only the entries for THIS cube (the scope is a
@@ -188,9 +206,9 @@ pub fn compile(
     scope.sort_by(|a, b| a.0.cmp(b.0));
     for (member, value) in scope {
         let (_, field) = split_member(member)?;
-        let (expr, _) = dimension_expr(cube, field)?;
+        let (expr, dt) = dimension_expr(cube, field)?;
         params.push(value.clone());
-        where_parts.push(format!("{} = ${}", expr, params.len()));
+        where_parts.push(format!("{} = {}", expr, placeholder(params.len(), dt)));
     }
 
     // ORDER BY by alias (any selected member).
@@ -234,7 +252,7 @@ fn compile_filter(
     if cube.measures.contains_key(field) {
         return Err(CompileError::MeasureFilter(f.member.clone()));
     }
-    let (expr, _) = dimension_expr(cube, field)?;
+    let (expr, dim_type) = dimension_expr(cube, field)?;
 
     let one = |params: &mut Vec<ScalarValue>| -> Result<usize, CompileError> {
         let v = f
@@ -245,14 +263,15 @@ fn compile_filter(
         params.push(v);
         Ok(params.len())
     };
+    let ph = |idx| placeholder(idx, dim_type);
 
     Ok(match f.operator {
-        FilterOperator::Equals => format!("{} = ${}", expr, one(params)?),
-        FilterOperator::NotEquals => format!("{} <> ${}", expr, one(params)?),
-        FilterOperator::Gt => format!("{} > ${}", expr, one(params)?),
-        FilterOperator::Gte => format!("{} >= ${}", expr, one(params)?),
-        FilterOperator::Lt => format!("{} < ${}", expr, one(params)?),
-        FilterOperator::Lte => format!("{} <= ${}", expr, one(params)?),
+        FilterOperator::Equals => format!("{} = {}", expr, ph(one(params)?)),
+        FilterOperator::NotEquals => format!("{} <> {}", expr, ph(one(params)?)),
+        FilterOperator::Gt => format!("{} > {}", expr, ph(one(params)?)),
+        FilterOperator::Gte => format!("{} >= {}", expr, ph(one(params)?)),
+        FilterOperator::Lt => format!("{} < {}", expr, ph(one(params)?)),
+        FilterOperator::Lte => format!("{} <= {}", expr, ph(one(params)?)),
         FilterOperator::Set => format!("{} is not null", expr),
         FilterOperator::NotSet => format!("{} is null", expr),
         FilterOperator::Contains => {
@@ -262,7 +281,8 @@ fn compile_filter(
                 None => return Err(CompileError::NeedsOneValue(f.member.clone())),
             };
             params.push(ScalarValue::String(format!("%{v}%")));
-            format!("{} ilike ${}", expr, params.len())
+            // ilike needs text; cast the column so it works on non-text columns.
+            format!("{}::text ilike ${}", expr, params.len())
         }
         FilterOperator::In | FilterOperator::NotIn => {
             if f.values.is_empty() {
@@ -271,7 +291,7 @@ fn compile_filter(
             let mut placeholders = Vec::new();
             for v in &f.values {
                 params.push(v.clone());
-                placeholders.push(format!("${}", params.len()));
+                placeholders.push(ph(params.len()));
             }
             let op = if matches!(f.operator, FilterOperator::In) { "in" } else { "not in" };
             format!("{} {} ({})", expr, op, placeholders.join(", "))

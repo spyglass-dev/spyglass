@@ -1,0 +1,17 @@
+{
+  "id": "store-performance",
+  "title": "Store performance",
+  "description": "Revenue and rental activity for the scoped store. Change the scope to compare store 1 vs store 2.",
+  "scope": { "Payment.store_id": 1, "Rental.store_id": 1, "Customer.store_id": 1 },
+  "widgets": [
+    { "type": "metric", "w": 1, "title": "Revenue", "format": "currency", "query": { "measures": ["Payment.revenue"] } },
+    { "type": "metric", "w": 1, "title": "Payments", "query": { "measures": ["Payment.count"] } },
+    { "type": "metric", "w": 1, "title": "Rentals", "query": { "measures": ["Rental.count"] } },
+    { "type": "metric", "w": 1, "title": "Customers", "query": { "measures": ["Customer.count"] } },
+    { "type": "table", "w": 2, "title": "Customers by active flag",
+      "query": { "measures": ["Customer.count", "Customer.active"], "dimensions": ["Customer.activebool"] } },
+    { "type": "metric", "w": 1, "title": "Rentals returned", "query": { "measures": ["Rental.returned"] } },
+    { "type": "metric", "w": 1, "title": "Renting customers", "query": { "measures": ["Rental.customers"] } },
+    { "type": "note", "w": 4, "markdown": "Every query is scoped by `store_id` — the mandatory tenant filter. Switch the scope in the UI header to see store 2." }
+  ]
+}

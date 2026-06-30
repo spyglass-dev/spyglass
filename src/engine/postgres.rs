@@ -80,23 +80,33 @@ impl PostgresEngine {
         let started = Instant::now();
         let compiled = self.compile(model, query, ctx)?;
 
-        // Bind params as boxed concrete types (never string-interpolated).
+        // Bind every param as TEXT (never string-interpolated). The compiler
+        // casts each placeholder to the column's type (`$n::numeric`,
+        // `$n::timestamptz`, …), so binding as text avoids tokio-postgres
+        // mis-inferring an `int4`/`timestamptz` column from an `i64`/`String`
+        // Rust value (which fails with "error serializing parameter").
         let boxed: Vec<Box<dyn ToSql + Sync>> = compiled
             .params
             .iter()
             .map(|v| -> Box<dyn ToSql + Sync> {
                 match v {
                     ScalarValue::String(s) => Box::new(s.clone()),
-                    ScalarValue::Int(i) => Box::new(*i),
-                    ScalarValue::Float(f) => Box::new(*f),
-                    ScalarValue::Bool(b) => Box::new(*b),
+                    ScalarValue::Int(i) => Box::new(i.to_string()),
+                    ScalarValue::Float(f) => Box::new(f.to_string()),
+                    ScalarValue::Bool(b) => Box::new(b.to_string()),
                     ScalarValue::Null => Box::new(Option::<String>::None),
                 }
             })
             .collect();
-        let refs: Vec<&(dyn ToSql + Sync)> = boxed.iter().map(|b| b.as_ref()).collect();
+        // Declare every parameter as TEXT so Postgres does not re-infer its
+        // type from the column; the compiler's `$n::numeric`/`$n::timestamptz`
+        // casts then coerce the text value to the column's type.
+        let typed: Vec<(&(dyn ToSql + Sync), Type)> = boxed
+            .iter()
+            .map(|b| (b.as_ref() as &(dyn ToSql + Sync), Type::TEXT))
+            .collect();
 
-        let rows = self.client.query(&compiled.sql, &refs).await?;
+        let rows = self.client.query_typed(&compiled.sql, &typed).await?;
         let json_rows: Vec<_> = rows.iter().map(|r| row_to_json(r)).collect();
 
         if let Some(exporter) = &self.exporter {

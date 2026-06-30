@@ -99,6 +99,22 @@ curl -s localhost:8088/query -H 'content-type: application/json' -d '{
 See [web/docs/getting-started.md](./web/docs/getting-started.md) and
 [web/docs/querying.md](./web/docs/querying.md).
 
+### Try it on a real dataset
+
+The repo ships a one-command, reproducible harness on the public
+[Pagila](https://github.com/devrimgunduz/pagila) dataset (a DVD-rental store) in
+Docker — it uses the two stores as tenants to demonstrate scope isolation:
+
+```bash
+tests/pagila/setup.sh      # download + load Pagila into Docker
+tests/pagila/serve.sh      # serve cubes at http://127.0.0.1:8089 (explorer UI)
+tests/pagila/validate.sh   # smoke test + scope-isolation check
+```
+
+A DB-gated integration test (`cargo test --test pagila_integration`) runs the
+real query path against it; the rest of `cargo test` is pure. See
+[`tests/pagila/`](./tests/pagila).
+
 ## Generating cubes from your database with distri
 
 The best cubes come from reading the database — structure **and** data — next to

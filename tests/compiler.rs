@@ -189,6 +189,52 @@ cubes:
 }
 
 #[test]
+fn casts_placeholders_to_column_types() {
+    // The engine binds every param as text, so the compiler must cast each
+    // placeholder to the column's type — `$n::numeric` / `$n::timestamptz` /
+    // `$n::boolean` — and leave string columns bare. This is the fix that lets
+    // an int4 `store_id` / a timestamp / a boolean column be filtered at all
+    // (otherwise tokio-postgres errors with "error serializing parameter").
+    let yaml = r#"
+cubes:
+  Sales:
+    sql_table: sales
+    dimensions:
+      store_id: { type: number,  sql: store_id, tenant: true }
+      active:   { type: boolean, sql: active }
+      region:   { type: string,  sql: region }
+      sold_at:  { type: time,    sql: sold_at }
+    measures:
+      count: { type: count }
+"#;
+    let model = spyglass::loader::parse_str(yaml, "t.yml").unwrap();
+
+    // number tenant scope → ::numeric
+    let mut scope = BTreeMap::new();
+    scope.insert("Sales.store_id".to_string(), ScalarValue::Int(2));
+    let ctx = SecurityContext { scope };
+    let q: Query = serde_json::from_value(serde_json::json!({ "measures": ["Sales.count"] })).unwrap();
+    let c = spyglass::compile(&model, &q, &ctx).unwrap();
+    assert!(c.sql.contains("store_id = $1::numeric"), "{}", c.sql);
+
+    // boolean filter → ::boolean ; string filter → bare ; time range → ::timestamptz
+    let q2: Query = serde_json::from_value(serde_json::json!({
+        "measures": ["Sales.count"],
+        "filters": [
+            { "member": "Sales.active", "operator": "equals", "values": [true] },
+            { "member": "Sales.region", "operator": "equals", "values": ["west"] }
+        ],
+        "timeDimensions": [{ "dimension": "Sales.sold_at", "dateRange": ["2026-01-01", "2026-02-01"] }]
+    }))
+    .unwrap();
+    let c2 = spyglass::compile(&model, &q2, &SecurityContext::default()).unwrap();
+    assert!(c2.sql.contains("active = $1::boolean"), "{}", c2.sql);
+    assert!(c2.sql.contains("region = $2") && !c2.sql.contains("region = $2::"), "{}", c2.sql);
+    assert!(c2.sql.contains("sold_at >= $3::timestamptz"), "{}", c2.sql);
+    assert!(c2.sql.contains("sold_at < $4::timestamptz"), "{}", c2.sql);
+}
+
+#[test]
 fn scope_is_per_cube() {
     // A model-wide scope keyed by Cube.member must NOT make a single-cube query
     // "span multiple cubes", and only the queried cube's scope entry applies.

@@ -5,7 +5,11 @@
  */
 import type { ReportDoc } from '@spyglass/ui'
 
-const BASE = (import.meta as { env?: Record<string, string> }).env?.VITE_SPYGLASS_API || '/api'
+// In the Vite dev server we call `/api/*` (proxied to spyglass-server). When the
+// app is built and embedded INTO spyglass-server it's same-origin, so the base
+// is empty. Override with VITE_SPYGLASS_API.
+const env = (import.meta as { env?: Record<string, string> }).env
+const BASE = env?.VITE_SPYGLASS_API ?? (env?.DEV ? '/api' : '')
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(BASE + path, init)

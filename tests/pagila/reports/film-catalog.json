@@ -1,0 +1,16 @@
+{
+  "id": "film-catalog",
+  "title": "Film catalog",
+  "description": "The shared film catalog — a cube with no tenant dimension (catalog data isn't store-scoped).",
+  "scope": {},
+  "widgets": [
+    { "type": "metric", "w": 1, "title": "Films", "query": { "measures": ["Film.count"] } },
+    { "type": "metric", "w": 1, "title": "Avg rental rate", "query": { "measures": ["Film.avg_rental_rate"] } },
+    { "type": "metric", "w": 1, "title": "Avg length (min)", "query": { "measures": ["Film.avg_length"] } },
+    { "type": "metric", "w": 1, "title": "Avg replacement", "format": "currency", "query": { "measures": ["Film.avg_replacement"] } },
+    { "type": "chart", "w": 4, "title": "Films by rating",
+      "query": { "measures": ["Film.count"], "dimensions": ["Film.rating"] },
+      "chart": { "mark": "bar", "x": "Film.rating", "y": "Film.count" } },
+    { "type": "note", "w": 4, "markdown": "`Film` has no `tenant: true` dimension, so it's queried without a scope." }
+  ]
+}

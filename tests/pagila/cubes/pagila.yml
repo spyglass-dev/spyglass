@@ -1,0 +1,65 @@
+# Cubes for the Pagila sample database (a DVD-rental store). Authored per
+# skills/schema-to-cubes.md. Pagila is single-tenant, but it has TWO stores —
+# so we use `store_id` as the tenant dimension to demonstrate Spyglass's
+# mandatory scope isolation (every query gets `where store_id = $1`).
+#
+# `Payment` and `Rental` join to a dimension table to expose `store_id`;
+# `Customer` has it directly. `Film` is a shared catalog with no store, so it
+# has no tenant dimension (the `validate` subcommand warns about that — expected).
+cubes:
+  Payment:
+    sql: >
+      select p.payment_id, p.amount, p.payment_date, p.staff_id, p.customer_id,
+             c.store_id
+      from payment p
+      join customer c on c.customer_id = p.customer_id
+    title: Payments
+    dimensions:
+      store_id:     { type: number, sql: store_id, tenant: true }
+      payment_date: { type: time,   sql: payment_date }
+      staff_id:     { type: number, sql: staff_id }
+    measures:
+      count:       { type: count, title: Payments }
+      revenue:     { type: sum, sql: amount, title: Revenue }
+      avg_payment: { type: avg, sql: amount, title: Average payment }
+
+  Rental:
+    sql: >
+      select r.rental_id, r.rental_date, r.return_date, r.staff_id, r.customer_id,
+             i.store_id
+      from rental r
+      join inventory i on i.inventory_id = r.inventory_id
+    title: Rentals
+    dimensions:
+      store_id:    { type: number, sql: store_id, tenant: true }
+      rental_date: { type: time,   sql: rental_date }
+      return_date: { type: time,   sql: return_date }
+      staff_id:    { type: number, sql: staff_id }
+    measures:
+      count:     { type: count, title: Rentals }
+      customers: { type: count_distinct, sql: customer_id, title: Renting customers }
+      returned:  { type: sum, sql: "case when return_date is not null then 1 else 0 end", title: Returned }
+
+  Customer:
+    sql_table: customer
+    title: Customers
+    dimensions:
+      store_id:    { type: number,  sql: store_id, tenant: true }
+      activebool:  { type: boolean, sql: activebool }
+      create_date: { type: time,    sql: create_date }
+    measures:
+      count:  { type: count, title: Customers }
+      active: { type: sum, sql: "case when activebool then 1 else 0 end", title: Active }
+
+  Film:
+    sql_table: film
+    title: Films (shared catalog — no tenant)
+    dimensions:
+      rating:          { type: string, sql: "rating::text" }
+      rental_duration: { type: number, sql: rental_duration }
+      release_year:    { type: number, sql: release_year }
+    measures:
+      count:            { type: count, title: Films }
+      avg_rental_rate:  { type: avg, sql: rental_rate, title: Average rental rate }
+      avg_length:       { type: avg, sql: length, title: Average length (min) }
+      avg_replacement:  { type: avg, sql: replacement_cost, title: Average replacement cost }

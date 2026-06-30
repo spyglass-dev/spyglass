@@ -1,0 +1,23 @@
+# Pagila — the canonical Postgres sample database (a DVD-rental store). Used as
+# the reproducible, open-source dataset for Spyglass's integration tests and the
+# distri analyze→report demo. `setup.sh` downloads + loads it into this container.
+services:
+  db:
+    image: postgres:16
+    container_name: spyglass-pagila
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: pagila
+    ports:
+      - "5438:5432"
+    volumes:
+      - pagila-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pagila"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pagila-data:
