@@ -7,7 +7,16 @@ target/
 # Local env + runtime output (see .env.sample).
 .env
 logs/
+testing/.env
+testing/logs/
+testing/schema.json
+testing/profile.json
 
 # Docusaurus (web/) build output.
 web/build/
 web/.docusaurus/
+
+initial_convo.txt
+
+
+testing/

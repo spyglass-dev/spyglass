@@ -1,37 +1,25 @@
 {
-  "name": "@spyglass/ui",
+  "name": "@spyglass/studio",
   "version": "0.1.0",
-  "description": "JSON-expressible reporting widgets: metric, table, chart, note + a custom-component registry. Renders a ReportDoc. Pairs with the `reporting` engine.",
-  "license": "Apache-2.0",
+  "private": true,
+  "description": "Standalone reporting studio — a small query interface + report editor over the spyglass engine and @spyglass/ui widgets. Reports persist in IndexedDB; import/export as JSON.",
   "type": "module",
-  "main": "dist/index.js",
-  "module": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
-  "files": ["dist"],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "type-check": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "type-check": "tsc --noEmit"
   },
-  "peerDependencies": {
-    "react": ">=18",
-    "react-dom": ">=18"
+  "dependencies": {
+    "@spyglass/ui": "workspace:*",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
   },
   "devDependencies": {
-    "@testing-library/react": "^16.3.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "jsdom": "^29.0.1",
-    "react": "19.2.6",
-    "react-dom": "19.2.6",
+    "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.8.3",
-    "vitest": "^3.2.4"
+    "vite": "^5.4.11"
   }
 }
