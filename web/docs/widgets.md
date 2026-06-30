@@ -50,9 +50,39 @@ raw data into chat.
 
 ## Studio
 
-`@spyglass/studio` is a standalone Vite app: edit a report's JSON, see it render
-live, persist to IndexedDB, and import/export reports. It consumes `@spyglass/ui`
-straight from source in dev (no build step).
+**Studio** is the Spyglass UI — a React/Vite app that talks to spyglass-server
+(`/meta`, `/query`, `/reports`). It has four tabs:
+
+- **Cubes** — browse the catalog from `/meta` (every cube's measures,
+  dimensions, and which one is the `tenant` key).
+- **Build query** — pick a cube + measures/dimensions, run `/query` under the
+  current scope, and add the result to a report.
+- **Reports** — list the bound reports saved on the server and **run** them
+  (resolving their queries live) for the chosen scope.
+- **Editor** — edit a report's JSON with a live preview; persist to IndexedDB.
+
+The **scope** box in the header is the tenant value applied to every cube's
+`tenant: true` dimension (e.g. `store_id` for the Pagila demo, `workspace_id`
+for a SaaS host) — it's discovered from `/meta`, not hardcoded. Leave it blank to
+use each report's own default scope.
+
+### Serving the UI
+
+Studio is **embedded into `spyglass-server`** behind the `ui` feature — one
+binary serves both the app (at `/`) and the APIs (same origin, no CORS):
+
+```bash
+make ui                                  # pnpm build studio + cargo build --features ui
+./target/release/spyglass-server serve   # open http://127.0.0.1:8088
+```
+
+Without the `ui` feature, `/` serves a zero-build HTML explorer (the same
+cubes / query / reports views, no Node required). For UI development, run the
+Vite dev server with hot reload and a proxy to the API:
+
+```bash
+pnpm dev   # studio at http://localhost:5197, proxying /api → spyglass-server
+```
 
 Develop the widgets themselves in isolation with Storybook (`pnpm storybook`).
 

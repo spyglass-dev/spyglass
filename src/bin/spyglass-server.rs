@@ -235,11 +235,51 @@ async fn report_run(
     HttpResponse::Ok().json(spyglass::report::report_doc(&report, widgets))
 }
 
-/// GET / — the embedded, zero-build explorer (cubes + query runner + reports).
-async fn explorer() -> impl Responder {
-    HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(include_str!("explorer.html"))
+// ─── UI: built Studio app (feature `ui`) or the zero-build explorer ─────────
+
+#[cfg(feature = "ui")]
+mod embedded_ui {
+    use rust_embed::RustEmbed;
+    /// The compiled Studio React app. Build it first:
+    /// `pnpm --filter @spyglass/studio build`.
+    #[derive(RustEmbed)]
+    #[folder = "studio/dist"]
+    pub struct StudioUi;
+}
+
+/// Default service for anything not matched by an API route. With the `ui`
+/// feature it serves the embedded Studio SPA (index.html as the client-routing
+/// fallback); without it, `/` serves the zero-build explorer.
+async fn ui_handler(req: actix_web::HttpRequest) -> impl Responder {
+    let path = req.path().trim_start_matches('/');
+
+    #[cfg(feature = "ui")]
+    {
+        use embedded_ui::StudioUi;
+        let asset = if path.is_empty() { "index.html" } else { path };
+        if let Some(file) = StudioUi::get(asset) {
+            return HttpResponse::Ok()
+                .content_type(file.metadata.mimetype())
+                .body(file.data.into_owned());
+        }
+        // SPA fallback — serve index.html for client-side routes.
+        if let Some(index) = StudioUi::get("index.html") {
+            return HttpResponse::Ok()
+                .content_type("text/html; charset=utf-8")
+                .body(index.data.into_owned());
+        }
+        return HttpResponse::NotFound().body("UI not built (run: pnpm --filter @spyglass/studio build)");
+    }
+
+    #[cfg(not(feature = "ui"))]
+    {
+        if path.is_empty() {
+            return HttpResponse::Ok()
+                .content_type("text/html; charset=utf-8")
+                .body(include_str!("explorer.html"));
+        }
+        HttpResponse::NotFound().json(serde_json::json!({ "error": "not found" }))
+    }
 }
 
 fn database_url() -> String {
@@ -294,7 +334,6 @@ async fn serve() -> std::io::Result<()> {
             // catalog/reports APIs (POSTs from another origin should use a dev
             // proxy; same-origin explorer needs none).
             .wrap(actix_web::middleware::DefaultHeaders::new().add(("Access-Control-Allow-Origin", "*")))
-            .route("/", web::get().to(explorer))
             .route("/health", web::get().to(health))
             .route("/meta", web::get().to(meta))
             .route("/schema", web::get().to(schema))
@@ -304,6 +343,8 @@ async fn serve() -> std::io::Result<()> {
             .route("/reports", web::post().to(report_save))
             .route("/reports/{id}", web::get().to(report_get))
             .route("/reports/{id}/run", web::post().to(report_run))
+            // UI (and SPA fallback) — must be last so API routes win.
+            .default_service(web::route().to(ui_handler))
     })
     .bind(&addr)?
     .run()

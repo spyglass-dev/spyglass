@@ -15,6 +15,10 @@ default = ["postgres", "server", "tls"]
 postgres = ["dep:tokio-postgres", "dep:tokio"]
 server = ["dep:actix-web", "dep:tokio", "dep:env_logger", "dep:log", "dep:time", "dep:dotenvy"]
 tls = ["dep:rustls", "dep:tokio-postgres-rustls", "dep:webpki-roots"]
+# Embed the built Studio React app (studio/dist) into the binary and serve it
+# at `/`. Build the app first (`pnpm --filter @spyglass/studio build`), then
+# `cargo build --features ui`. Without it, `/` serves the zero-build explorer.
+ui = ["dep:rust-embed"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -38,6 +42,8 @@ webpki-roots = { version = "0.26", optional = true }
 # enable `server` (no actix) aren't forced onto 0.3.41 — letting their own
 # graph (e.g. sentry needing `time >= 0.3.47`) resolve freely.
 time = { version = "=0.3.41", optional = true }
+# Embeds studio/dist into the binary under the `ui` feature.
+rust-embed = { version = "8", optional = true, features = ["mime-guess"] }
 
 [[bin]]
 name = "spyglass-server"

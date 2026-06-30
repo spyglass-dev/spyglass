@@ -72,7 +72,7 @@ the caller.
 
 | Method & path | Purpose |
 |---------------|---------|
-| `GET /` | The embedded explorer UI (cubes + query runner + reports). |
+| `GET /` | The UI — the embedded [Studio](./widgets.md#studio) app (`--features ui`), or a zero-build explorer otherwise (cubes + query runner + reports). |
 | `GET /health` | `{ "ok": true }`. |
 | `GET /meta` | The **catalog** — cubes with their measures/dimensions (`Cube.member` names, types, tenant flags) and no SQL. What a UI uses to build queries. |
 | `POST /query` | Run a query (above). |

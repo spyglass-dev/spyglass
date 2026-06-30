@@ -21,3 +21,5 @@ initial_convo.txt
 
 
 testing/
+# Built UI (embedded into the binary via `--features ui`).
+studio/dist/
