@@ -1,20 +1,138 @@
-# Spyglass
+# Spyglass 🔭
 
-A small, self-contained, **domain-agnostic** semantic-layer framework, designed
-to be lifted out of this repo and open-sourced. Define metrics/measures in a
-Cube-style model, query them through one endpoint, and render the results as
-JSON widgets.
+A small, self-contained, **domain-agnostic** semantic-layer framework. Define
+metrics and dimensions in a **Cube-style** model, query them through one
+endpoint, and render the results as JSON widgets — embeddable as a Rust crate or
+runnable as a standalone binary.
 
-## The ecosystem (nautical map)
+> **Open source under [Apache-2.0](./LICENSE.md).**
 
-| Component   | Role               | Today                              |
-|-------------|--------------------|------------------------------------|
-| **spyglass**  | semantic layer     | the crate (`model` / `query` / `context`) |
-| **sextant**   | SQL generator      | `compiler`                         |
-| **compass**   | metadata / catalog | `introspect` (+ `loader`)          |
-| **telescope** | query planner      | folded into `compiler` for now     |
-| **harbor**    | cache              | planned                            |
-| **captain**   | orchestration      | `engine` (+ the host)              |
+📖 **Full documentation:** the [`web/docs/`](./web/docs) folder, published as a
+Docusaurus site — see [Documentation site](#documentation-site).
+
+## What it is
+
+Instead of letting every report write raw SQL against raw tables, you describe
+your data once as **cubes** — entities with **measures** (aggregations) and
+**dimensions** (group-by / filter columns). Callers ask for measures and
+dimensions; Spyglass compiles that into safe, parameterized SQL, injects a
+mandatory tenant scope, and runs it. Agents, dashboards, and the UI all
+reference data by `Cube.member`.
+
+- **Injection-safe by construction** — the compiler only emits members the model
+  declares; callers never hand-write SQL.
+- **Scoped by construction** — a `SecurityContext` injects mandatory tenant
+  filters; a caller can never widen scope or read raw tables.
+- **Embeddable** — a normal crate, or run the `spyglass-server` binary.
+
+## The cube format
+
+Spyglass models use a **Cube-style** YAML format. The term *cube* comes from
+[**Cube**](https://cube.dev), the open-source semantic layer
+([cube-js/cube](https://github.com/cube-js/cube)); Spyglass adopts its core
+vocabulary — *cubes*, *measures*, *dimensions* — in a small, embeddable subset.
+It is **not** Cube and implements only what's documented in
+[web/docs/cube-format.md](./web/docs/cube-format.md).
+
+```yaml
+cubes:
+  Orders:
+    sql_table: orders
+    dimensions:
+      tenant_id:  { type: string, sql: tenant_id, tenant: true } # mandatory scope
+      status:     { type: string, sql: status }
+      created_at: { type: time,   sql: created_at }
+    measures:
+      count:   { type: count }
+      revenue: { type: sum, sql: amount_cents, title: Revenue }
+```
+
+A full demo lives in [`examples/`](./examples).
+
+## Installing
+
+Install the `spyglass-server` binary with cargo:
+
+```bash
+cargo install spyglass                       # from crates.io
+cargo install --git https://github.com/distri-ai/spyglass spyglass   # from git
+```
+
+This puts `spyglass-server` on your `PATH`. Bring-your-own-DB-client embedders
+who only want the library add the crate as a dependency instead:
+
+```toml
+[dependencies]
+spyglass = { version = "0.1", default-features = false, features = ["postgres"] }
+```
+
+## Quick start
+
+With the binary installed (or run it from a checkout with `cargo run -p spyglass
+--bin spyglass-server -- …`):
+
+```bash
+cp .env.sample .env                # set DATABASE_URL
+set -a; source .env; set +a        # the binary reads the environment
+
+REPORTING_CUBES=./examples spyglass-server      # serve POST /query (TLS)
+```
+
+From a source checkout instead:
+
+```bash
+cargo test -p spyglass             # pure compiler tests, no DB
+REPORTING_CUBES=./examples \
+  cargo run -p spyglass --bin spyglass-server   # serve POST /query (TLS)
+```
+
+```bash
+curl -s localhost:8088/query -H 'content-type: application/json' -d '{
+  "query": { "measures": ["Orders.revenue"], "dimensions": ["Orders.status"] },
+  "scope": { "tenant_id": "ws_123" }
+}'
+```
+
+See [web/docs/getting-started.md](./web/docs/getting-started.md) and
+[web/docs/querying.md](./web/docs/querying.md).
+
+## Generating cubes from your database with distri
+
+The best cubes come from reading the database — structure **and** data — next to
+the host's source. Spyglass exposes that as an **offline, admin-time** task
+driven by [**distri**](https://github.com/distri-ai/distri), an A2A agent
+platform with a CLI.
+
+```bash
+cp .env.sample .env                # set DATABASE_URL — distri reads the same env
+set -a; source .env; set +a
+
+# Offline subcommands emit JSON for an agent to read:
+cargo run -p spyglass --bin spyglass-server -- schema            # tables + columns
+cargo run -p spyglass --bin spyglass-server -- analyze --profile # cardinality, ranges, top values
+cargo run -p spyglass --bin spyglass-server -- bundle  --profile --source src  # schema + profile + source, one JSON
+
+# Drive it inline: distri reads the bundle and writes cube YAML into ./examples,
+# following the bundled schema-to-cubes skill.
+distri run schema-to-cubes \
+  "Profile this database with `spyglass-server bundle --profile --source src` and
+   write cube YAML into ./examples, following the schema-to-cubes skill."
+```
+
+`schema` / `analyze` / `bundle` are **offline** — not the tenant-scoped runtime
+path. Full walkthrough: [web/docs/generating-cubes.md](./web/docs/generating-cubes.md).
+The agent skills ship in [`skills/`](./skills).
+
+## Widgets & reports
+
+`@spyglass/ui` renders query results as **reports** — saveable, exportable docs
+of JSON widgets (`metric`, `table`, `chart`, `note`, `custom`). `@spyglass/studio`
+is a standalone editor. See [web/docs/widgets.md](./web/docs/widgets.md).
+
+```bash
+pnpm --filter @spyglass/ui build
+pnpm --filter @spyglass/ui test
+```
 
 ## Layout
 
@@ -23,68 +141,27 @@ spyglass/
   Cargo.toml          # the engine crate (lib + spyglass-server bin)
   src/                # model, query, compiler, context, loader, engine/*
   tests/              # cargo tests (pure compiler — no DB)
-  cubes/              # Cube-format metric definitions (generic example.yml)
+  examples/           # generic, domain-agnostic cube definitions
   skills/             # distri agent skills (querying + authoring reports)
   ui/                 # @spyglass/ui — JSON-expressible widgets (React)
   studio/             # @spyglass/studio — standalone query/editor app
+  web/                # Docusaurus docs site (docs in web/docs)
+  .env.sample         # DATABASE_URL + server config
 ```
 
-This crate is **domain-agnostic** and designed to be extracted to its own repo:
-no host-specific cubes, skills, or schema live here. The host (e.g. an app that
-embeds it) supplies its own cube definitions, security context, and DB client.
+See [web/docs/architecture.md](./web/docs/architecture.md) for the component map.
 
-## Engine (Rust crate)
+## Documentation site
 
-- **Pluggable** behind feature flags; `postgres` is the default. The pure
-  `compiler` turns a Cube-shaped `Query` + `Model` + `SecurityContext` into
-  parameterized SQL (injection-safe); engines execute it.
-- **Scoped by construction** — the `SecurityContext` injects mandatory
-  tenant filters (workspace/student); callers pick measures/dimensions and can
-  never escape scope or see raw tables.
-- **Embeddable** — `spyglass` is a normal crate; the host supplies the model,
-  a DB client, and the security context. Or run the standalone
-  `spyglass-server` binary (`POST /query`, reads cube defs from `./cubes`).
-- **TLS by default** (`tls` feature, rustls) so it connects to real databases;
-  embedders that bring their own client opt out with
-  `default-features = false, features = ["postgres"]`.
+The documentation lives in [`web/docs/`](./web/docs) as Markdown (readable here
+on GitHub) and is published as a Docusaurus site from [`web/`](./web). The
+[`.github/workflows/docs.yml`](./.github/workflows/docs.yml) workflow builds and
+deploys it to GitHub Pages on every push to `main`.
 
 ```bash
-cargo test -p spyglass                                          # compiler tests
-cargo run -p spyglass --bin spyglass-server                    # serve POST /query (TLS)
-cargo run -p spyglass --bin spyglass-server -- schema          # offline: dump schema
-cargo run -p spyglass --bin spyglass-server -- analyze --profile
-cargo run -p spyglass --bin spyglass-server -- bundle --profile --source <path-to-schema> --source <path-to-services>
+cd web && pnpm install && pnpm start   # local docs at http://localhost:3000
 ```
 
-Building cubes is an OFFLINE/admin task (not a runtime path): a distri-CLI
-agent runs `bundle` to read the schema + data profile + relevant source code in
-one shot, then writes cube YAML into `cubes/` (see `skills/schema-to-cubes.md`).
+## License
 
-## Widgets (the UI package)
-
-JSON-expressible widgets — `metric`, `table`, `chart`, `note`, and `custom`
-(host-registered). A `ReportDoc` is an ordered list laid out on a 4-col grid.
-Dependency-light + inline-styled so it renders in the studio and embeds in any
-host app alike.
-
-```bash
-pnpm --filter @spyglass/ui build
-pnpm --filter @spyglass/ui test
-```
-
-> Note: the npm packages use the `@spyglass/*` scope; the Rust crate is `spyglass`.
-
-## Studio
-
-A standalone Vite app: edit a report's JSON, see it render live, persist to
-IndexedDB, import/export. (Agent editor + live query panel are in progress.)
-
-## Status
-
-- [x] Engine: Cube model, query compiler, Postgres engine (TLS), loader, tests
-- [x] `spyglass-server` binary: `serve` (POST /query) + offline `schema` /
-      `analyze` / `bundle`
-- [x] UI widgets (metric/table/chart/note/custom) + tests
-- [x] Studio shell (JSON editor + live render + IDB + import/export)
-- [ ] Studio agent editor + live query panel
-- [ ] Vega-Lite chart renderer behind the `chart` spec
+[Apache License 2.0](./LICENSE.md).

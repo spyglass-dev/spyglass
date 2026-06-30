@@ -1,6 +1,8 @@
-# Example cube definitions — GENERIC, for documentation/demo only. The
-# `reporting` crate is domain-agnostic; a host supplies its own cubes (the
-# `spyglass-server` binary loads `./cubes`). Replace/remove for real use.
+# Example cube definitions — GENERIC, for documentation/demo only. Spyglass is
+# domain-agnostic; a host supplies its own cubes. The `spyglass-server` binary
+# loads the directory named by `REPORTING_CUBES` (point it at `./examples` to
+# serve this file, e.g. `REPORTING_CUBES=./examples`). Replace/remove for real
+# use, or generate cubes from your own database with distri (see web/docs/).
 cubes:
   Events:
     sql_table: events

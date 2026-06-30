@@ -1,0 +1,23 @@
+/* Spyglass docs theme — a calm, nautical palette. */
+:root {
+  --ifm-color-primary: #1f6f8b;
+  --ifm-color-primary-dark: #1c647d;
+  --ifm-color-primary-darker: #1a5e76;
+  --ifm-color-primary-darkest: #154d61;
+  --ifm-color-primary-light: #227a99;
+  --ifm-color-primary-lighter: #2480a0;
+  --ifm-color-primary-lightest: #2991b5;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #6fc3df;
+  --ifm-color-primary-dark: #54b8d9;
+  --ifm-color-primary-darker: #46b2d6;
+  --ifm-color-primary-darkest: #2a9cc2;
+  --ifm-color-primary-light: #8acee6;
+  --ifm-color-primary-lighter: #98d4e9;
+  --ifm-color-primary-lightest: #c1e6f2;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}

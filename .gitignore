@@ -3,3 +3,11 @@ target/
 **/dist/
 **/node_modules/
 *.tsbuildinfo
+
+# Local env + runtime output (see .env.sample).
+.env
+logs/
+
+# Docusaurus (web/) build output.
+web/build/
+web/.docusaurus/
