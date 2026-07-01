@@ -35,7 +35,7 @@ numbers up top, then `chart` / `table` widgets, with `note`s for narrative.
   "title": "Orders overview",
   "widgets": [
     { "type": "metric", "w": 1, "title": "Revenue", "value": 128400 },
-    { "type": "chart", "w": 3, "mark": "bar", "data": { "...": "..." } },
+    { "type": "chart", "w": 3, "chart": { "mark": "bar", "x": "status", "y": "count", "series": [{ "status": "paid", "count": 12 }] } },
     { "type": "note", "w": 4, "markdown": "Revenue up 12% week over week." }
   ]
 }
@@ -43,7 +43,7 @@ numbers up top, then `chart` / `table` widgets, with `note`s for narrative.
 
 ## Building reports with distri
 
-The bundled [`reporting`](https://github.com/distri-ai/spyglass/blob/main/skills/reporting.md)
+The bundled [`reporting`](https://github.com/spyglass-dev/spyglass/blob/main/skills/reporting.md)
 skill teaches an agent to: discover the cubes, run scoped queries via the
 endpoint, map each result into a widget, and save the report doc — never pasting
 raw data into chat.

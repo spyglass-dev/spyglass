@@ -46,11 +46,14 @@ This gives you:
 - [The cube format](./cube-format.md) — how a model is defined.
 - [Generating cubes with distri](./generating-cubes.md) — point it at a DB and
   let an agent author cubes.
-- [Querying](./querying.md) — the query shape and the `POST /query` endpoint.
-- [Widgets & reports](./widgets.md) — turning results into renderable docs.
+- [Analyzing your data](./analyze.md) — profile a database to drive cubes.
+- [Querying](./querying.md) — the query shape and the server endpoints.
+- [Widgets & reports](./widgets.md) — the Studio UI and renderable report docs.
+- [Embedding in other apps](./embedding.md) — the engine, the API, and the widgets.
+- [Testing](./testing.md) — pure tests + the Pagila integration harness.
 - [Architecture](./architecture.md) — the nautical map of components.
 
 ## License
 
 Spyglass is licensed under the
-[Apache License 2.0](https://github.com/distri-ai/spyglass/blob/main/LICENSE.md).
+[Apache License 2.0](https://github.com/spyglass-dev/spyglass/blob/main/LICENSE.md).

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Dev server with auto-restart on code/cube changes (watchexec).
+#
+#   bin/server                 # serve tests/pagila (the Pagila demo)
+#   bin/server tests/pagila    # explicit
+#   bin/server testing         # the zippy harness
+#   FEATURES=ui bin/server     # build + serve the embedded Studio app at /
+#
+# Sources <DIR>/.env (falls back to <DIR>/.env.sample) for DATABASE_URL +
+# REPORTING_* and passes them to the restarted process.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+DIR="${1:-tests/pagila}"
+
+if [ -f "$DIR/.env" ]; then set -a; source "$DIR/.env"; set +a
+elif [ -f "$DIR/.env.sample" ]; then set -a; source "$DIR/.env.sample"; set +a
+fi
+
+echo "watchexec → spyglass-server -C $DIR serve  (cubes from $DIR/cubes)"
+if [ -n "${FEATURES:-}" ]; then
+  exec watchexec --restart --clear \
+    --watch src --watch "$DIR/cubes" --watch "$DIR/reports" --exts rs,yml,yaml,json,html \
+    -- cargo run --quiet --features "$FEATURES" --bin spyglass-server -- -C "$DIR" serve
+else
+  exec watchexec --restart --clear \
+    --watch src --watch "$DIR/cubes" --watch "$DIR/reports" --exts rs,yml,yaml,json,html \
+    -- cargo run --quiet --bin spyglass-server -- -C "$DIR" serve
+fi

@@ -58,7 +58,7 @@ the usable date range.
 
 [distri](https://github.com/distri-ai/distri) runs an agent that calls `bundle`,
 reads the schema + data + source in one shot, and writes cube YAML — following
-the bundled [`schema-to-cubes`](https://github.com/distri-ai/spyglass/blob/main/skills/schema-to-cubes.md)
+the bundled [`schema-to-cubes`](https://github.com/spyglass-dev/spyglass/blob/main/skills/schema-to-cubes.md)
 skill. Run it inline from the repo root:
 
 ```bash

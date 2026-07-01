@@ -12,10 +12,10 @@ const config = {
 
   // Set these to your published site. For GitHub Pages this is normally
   // https://<org>.github.io and /<repo>/.
-  url: 'https://distri-ai.github.io',
+  url: 'https://spyglass-dev.github.io',
   baseUrl: '/spyglass/',
 
-  organizationName: 'distri-ai', // GitHub org/user
+  organizationName: 'spyglass-dev', // GitHub org/user
   projectName: 'spyglass', // repo name
   trailingSlash: false,
 
@@ -41,7 +41,7 @@ const config = {
           routeBasePath: '/',
           sidebarPath: require.resolve('./sidebars.js'),
           editUrl:
-            'https://github.com/distri-ai/spyglass/tree/main/web/docs/',
+            'https://github.com/spyglass-dev/spyglass/tree/main/web/docs/',
         },
         blog: false,
         theme: {
@@ -64,7 +64,7 @@ const config = {
             label: 'Docs',
           },
           {
-            href: 'https://github.com/distri-ai/spyglass',
+            href: 'https://github.com/spyglass-dev/spyglass',
             label: 'GitHub',
             position: 'right',
           },
@@ -91,8 +91,8 @@ const config = {
           {
             title: 'More',
             items: [
-              { label: 'GitHub', href: 'https://github.com/distri-ai/spyglass' },
-              { label: 'License', href: 'https://github.com/distri-ai/spyglass/blob/main/LICENSE.md' },
+              { label: 'GitHub', href: 'https://github.com/spyglass-dev/spyglass' },
+              { label: 'License', href: 'https://github.com/spyglass-dev/spyglass/blob/main/LICENSE.md' },
             ],
           },
         ],

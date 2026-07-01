@@ -18,7 +18,8 @@
 //!                parse. For agents/CI to self-check generated cubes.
 //!
 //! Env: `DATABASE_URL` (required), `REPORTING_CUBES` (./cubes),
-//! `REPORTING_LOGS` (./logs), `REPORTING_ADDR` (127.0.0.1:8088). These are
+//! `REPORTING_REPORTS` (./reports), `REPORTING_LOGS` (./logs),
+//! `REPORTING_ADDR` (127.0.0.1:8088). These are
 //! read from the process environment and from a `.env` file (loaded via
 //! dotenvy after `-C`, so the working dir's `.env` is picked up).
 //!

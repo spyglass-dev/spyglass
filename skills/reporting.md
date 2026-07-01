@@ -13,7 +13,7 @@ You build **reports**: saveable, exportable documents of data widgets. Data
 comes from the **reporting engine** — a Cube-style semantic layer. You never
 write raw SQL and never touch raw tables; you query *measures* and *dimensions*
 and the engine compiles + scopes the SQL. The host pins the tenant scope
-(workspace, and optionally student) — you cannot widen it.
+(e.g. a workspace/account/store) — you cannot widen it.
 
 ## Concepts
 
@@ -45,9 +45,9 @@ and the engine compiles + scopes the SQL. The host pins the tenant scope
    the model declares.
 2. **Query** the reporting endpoint for each data widget. Keep queries small
    and purposeful; one query can feed one widget.
-3. **Lay out** the report: a `metric` row up top (the headline numbers a
-   grading-first teacher wants — to-grade, completion, avg score, at-risk),
-   then `chart`/`table` widgets, with `note`s for narrative.
+3. **Lay out** the report: a `metric` row up top (the headline numbers the
+   reader cares about — totals, rates, averages, outliers), then `chart`/`table`
+   widgets, with `note`s for narrative.
 4. **Save** the report doc in the product. Acknowledge with a one-line `final`;
    never dump the data as text in chat.
 
