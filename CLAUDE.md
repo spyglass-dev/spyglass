@@ -88,3 +88,5 @@ spyglass-server -C testing serve
   one for "how do I run it against a DB").
 - `skills/schema-to-cubes.md` — turn a DB schema into cube definitions (offline).
 - `skills/reporting.md` — author/render reports from query results.
+- `skills/row-level-security.md` — the two-layer tenant isolation model
+  (fail-closed compiler scope + optional Postgres RLS via a readonly role).

@@ -13,18 +13,53 @@ use tokio_postgres::{Client, Row};
 
 pub struct PostgresEngine {
     client: Client,
+    /// The connection string `connect` was built from — kept so the RLS path
+    /// can open a fresh, transaction-scoped connection per query. `None` for
+    /// engines built via [`new`] from a caller-owned client.
+    conn_str: Option<String>,
+    /// When set, every runtime query runs inside a transaction that first pins
+    /// a tenant GUC (`set_config(<guc>, <workspace>, true)`) so Postgres
+    /// row-level-security policies can enforce isolation at the database — a
+    /// defense-in-depth layer beneath the compiler's mandatory scope filters.
+    rls: Option<RlsConfig>,
     exporter: Option<Arc<dyn QueryExporter>>,
 }
 
+/// Config for the row-level-security execution path.
+#[derive(Clone)]
+struct RlsConfig {
+    /// Connection string used for the per-query RLS connection (point this at a
+    /// **readonly** role for true defense in depth).
+    conn_str: String,
+    /// The GUC name RLS policies read, e.g. `app.workspace_id`.
+    guc: String,
+}
+
 impl PostgresEngine {
-    /// Wrap an existing client (e.g. one the host already manages).
+    /// Wrap an existing client (e.g. one the host already manages). No RLS path
+    /// — the embedder owns connection management and applies its own scope.
     pub fn new(client: Client) -> Self {
-        Self { client, exporter: None }
+        Self { client, conn_str: None, rls: None, exporter: None }
     }
 
     /// Attach a query-log exporter — every executed query is recorded.
     pub fn with_exporter(mut self, exporter: Arc<dyn QueryExporter>) -> Self {
         self.exporter = Some(exporter);
+        self
+    }
+
+    /// Enable the database-level RLS path: each query runs in a transaction
+    /// that sets `guc` to the caller's tenant scope value before selecting, so
+    /// RLS policies (`using (... = current_setting('<guc>'))`) isolate tenants
+    /// at the database even if application-level scoping were bypassed. Only
+    /// effective for engines built via [`connect`] (needs the connection
+    /// string); a no-op warning otherwise.
+    pub fn with_rls_guc(mut self, guc: impl Into<String>) -> Self {
+        let guc = guc.into();
+        match &self.conn_str {
+            Some(conn_str) => self.rls = Some(RlsConfig { conn_str: conn_str.clone(), guc }),
+            None => eprintln!("with_rls_guc ignored: engine has no connection string (built via new())"),
+        }
         self
     }
 
@@ -49,6 +84,19 @@ impl PostgresEngine {
     /// the caller (the binary does this in `main`).
     #[cfg(feature = "postgres")]
     pub async fn connect(conn_str: &str) -> Result<Self, tokio_postgres::Error> {
+        let client = Self::connect_raw(conn_str).await?;
+        Ok(Self {
+            client,
+            conn_str: Some(conn_str.to_string()),
+            rls: None,
+            exporter: None,
+        })
+    }
+
+    /// Open one client + spawn its connection driver. Shared by [`connect`] and
+    /// the per-query RLS path.
+    #[cfg(feature = "postgres")]
+    async fn connect_raw(conn_str: &str) -> Result<Client, tokio_postgres::Error> {
         #[cfg(feature = "tls")]
         let (client, connection) = {
             let mut roots = rustls::RootCertStore::empty();
@@ -67,7 +115,7 @@ impl PostgresEngine {
                 eprintln!("postgres connection error: {e}");
             }
         });
-        Ok(Self { client, exporter: None })
+        Ok(client)
     }
 
     /// Compile + execute, returning JSON rows.
@@ -106,7 +154,19 @@ impl PostgresEngine {
             .map(|b| (b.as_ref() as &(dyn ToSql + Sync), Type::TEXT))
             .collect();
 
-        let rows = self.client.query_typed(&compiled.sql, &typed).await?;
+        // RLS path: when configured AND the query carries a tenant scope value,
+        // run in a transaction that pins the GUC first so database policies
+        // enforce isolation. Non-tenant queries (no scope) and engines without
+        // RLS use the shared client directly.
+        let workspace = self
+            .rls
+            .as_ref()
+            .and_then(|_| ctx.scope.values().next())
+            .map(scalar_text);
+        let rows = match (&self.rls, workspace) {
+            (Some(rls), Some(ws)) => self.run_rls(rls, &compiled.sql, &typed, &ws).await?,
+            _ => self.client.query_typed(&compiled.sql, &typed).await?,
+        };
         let json_rows: Vec<_> = rows.iter().map(|r| row_to_json(r)).collect();
 
         if let Some(exporter) = &self.exporter {
@@ -135,11 +195,45 @@ impl PostgresEngine {
             sql: Some(compiled.sql),
         })
     }
+
+    /// Execute one query under RLS: a fresh connection + transaction that pins
+    /// the tenant GUC via `set_config(name, value, is_local => true)` before the
+    /// select. Both GUC name and value are bound parameters (never
+    /// interpolated), so this is injection-safe. Read-only, so the transaction
+    /// is committed at the end (no writes to roll back).
+    #[cfg(feature = "postgres")]
+    async fn run_rls(
+        &self,
+        rls: &RlsConfig,
+        sql: &str,
+        typed: &[(&(dyn ToSql + Sync), Type)],
+        workspace: &str,
+    ) -> Result<Vec<Row>, EngineError> {
+        let mut client = Self::connect_raw(&rls.conn_str).await?;
+        let tx = client.transaction().await?;
+        tx.execute("select set_config($1, $2, true)", &[&rls.guc, &workspace])
+            .await?;
+        let rows = tx.query_typed(sql, typed).await?;
+        tx.commit().await?;
+        Ok(rows)
+    }
 }
 
 impl Engine for PostgresEngine {
     fn name(&self) -> &'static str {
         "postgres"
+    }
+}
+
+/// Render a scope value as the text passed to `set_config` for the tenant GUC.
+/// RLS policies cast it back (e.g. `current_setting('app.workspace_id')::int`).
+fn scalar_text(v: &ScalarValue) -> String {
+    match v {
+        ScalarValue::String(s) => s.clone(),
+        ScalarValue::Int(i) => i.to_string(),
+        ScalarValue::Float(f) => f.to_string(),
+        ScalarValue::Bool(b) => b.to_string(),
+        ScalarValue::Null => String::new(),
     }
 }
 

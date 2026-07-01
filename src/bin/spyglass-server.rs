@@ -327,6 +327,18 @@ async fn serve() -> std::io::Result<()> {
         }
     };
 
+    // Optional database-level RLS: when `SPYGLASS_RLS_GUC` is set, every query
+    // runs in a transaction that pins that GUC to the tenant scope, so Postgres
+    // row-level-security policies enforce isolation beneath the compiler's
+    // mandatory scope. Point `DATABASE_URL` at a readonly role for full effect.
+    let engine = match std::env::var("SPYGLASS_RLS_GUC") {
+        Ok(guc) if !guc.trim().is_empty() => {
+            eprintln!("RLS enabled: set_config('{}', <scope>, true) per query", guc.trim());
+            engine.with_rls_guc(guc.trim())
+        }
+        _ => engine,
+    };
+
     let reports_dir = std::env::var("REPORTING_REPORTS").unwrap_or_else(|_| "./reports".to_string());
     eprintln!("reports dir: {reports_dir}");
 
