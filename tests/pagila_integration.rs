@@ -21,7 +21,7 @@ fn revenue_query(store: i64) -> (Query, SecurityContext) {
     scope.insert("Payment.store_id".to_string(), ScalarValue::Int(store));
     (
         Query { measures: vec!["Payment.revenue".into()], ..Default::default() },
-        SecurityContext { scope },
+        SecurityContext { scope, ..Default::default() },
     )
 }
 

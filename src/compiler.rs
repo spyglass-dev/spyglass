@@ -26,6 +26,11 @@ pub enum CompileError {
     MeasureFilter(String),
     #[error("operator requires exactly one value: '{0}'")]
     NeedsOneValue(String),
+    #[error(
+        "cube '{cube}' requires a tenant scope for '{cube}.{dimension}' — refusing to run \
+         an unscoped query (set SecurityContext::allow_unscoped for admin/offline reads)"
+    )]
+    MissingTenantScope { cube: String, dimension: String },
 }
 
 /// A compiled, parameterized statement ready for an engine to execute.
@@ -192,6 +197,21 @@ pub fn compile(
             where_parts.push(format!("{} < {}", expr, placeholder(params.len(), dt)));
         }
     }
+    // Fail closed: a cube that declares a tenant dimension may not be queried
+    // without a scope value for it. This is the "queries only ever touch the
+    // caller's workspace" guarantee — a missing scope is an error, never a
+    // silent cross-tenant read. Admin/offline callers opt out explicitly.
+    if !ctx.allow_unscoped {
+        for (field, dim) in &cube.dimensions {
+            if dim.tenant && !ctx.scope.contains_key(&format!("{cube_name}.{field}")) {
+                return Err(CompileError::MissingTenantScope {
+                    cube: cube_name.clone(),
+                    dimension: field.clone(),
+                });
+            }
+        }
+    }
+
     // Mandatory scope filters — only the entries for THIS cube (the scope is a
     // model-wide map keyed by `Cube.member`). Sorted for deterministic SQL.
     let mut scope: Vec<(&String, &ScalarValue)> = ctx

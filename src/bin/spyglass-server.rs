@@ -60,6 +60,7 @@ struct QueryBody {
 async fn query(state: web::Data<AppState>, body: web::Json<QueryBody>) -> impl Responder {
     let ctx = SecurityContext {
         scope: body.scope.clone(),
+        ..Default::default()
     };
     match state.engine.run(&state.model, &body.query, &ctx).await {
         Ok(result) => HttpResponse::Ok().json(result),
@@ -214,7 +215,7 @@ async fn report_run(
             scope.insert(k, v);
         }
     }
-    let ctx = SecurityContext { scope };
+    let ctx = SecurityContext { scope, ..Default::default() };
 
     let mut widgets = Vec::with_capacity(report.widgets.len());
     for w in &report.widgets {
