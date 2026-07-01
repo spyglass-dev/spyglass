@@ -1,8 +1,8 @@
 //! Report resolver tests — pure, no database. Lock how bound widgets turn a
 //! `QueryResult` into the data-bearing `WidgetSpec` JSON the UI renders.
 
-use spyglass::query::{Column, QueryResult};
-use spyglass::report::{resolve_widget, BoundWidget, ChartHint};
+use spyglass::query::{Column, Filter, FilterOperator, Query, QueryResult, ScalarValue};
+use spyglass::report::{resolve_widget, with_run_filters, BoundWidget, ChartHint};
 use serde_json::json;
 
 fn result(columns: &[(&str, &str)], rows: Vec<serde_json::Value>) -> QueryResult {
@@ -97,4 +97,23 @@ fn note_passes_markdown_through() {
     let spec = resolve_widget(&w, None);
     assert_eq!(spec["type"], "note");
     assert_eq!(spec["markdown"], "**hi**");
+}
+
+#[test]
+fn run_filters_apply_only_to_matching_cube() {
+    // A report-wide filter bar passes every filter; each widget query gets only
+    // the filters that target its own cube (others would break single-cube).
+    let query = Query {
+        measures: vec!["Rental.count".into()],
+        dimensions: vec!["Rental.staff_id".into()],
+        ..Default::default()
+    };
+    let filters = vec![
+        Filter { member: "Rental.staff_id".into(), operator: FilterOperator::Equals, values: vec![ScalarValue::Int(2)] },
+        Filter { member: "Payment.staff_id".into(), operator: FilterOperator::Equals, values: vec![ScalarValue::Int(9)] },
+    ];
+    let out = with_run_filters(&query, &filters);
+    // Only the Rental-cube filter is appended; the Payment one is skipped.
+    assert_eq!(out.filters.len(), 1);
+    assert_eq!(out.filters[0].member, "Rental.staff_id");
 }

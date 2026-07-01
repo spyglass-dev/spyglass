@@ -37,7 +37,7 @@ use spyglass::context::SecurityContext;
 use spyglass::engine::postgres::PostgresEngine;
 use spyglass::logging::JsonFileExporter;
 use spyglass::model::Model;
-use spyglass::query::{Query, ScalarValue};
+use spyglass::query::{Filter, Query, ScalarValue};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -193,6 +193,10 @@ async fn report_save(
 struct RunBody {
     #[serde(default)]
     scope: BTreeMap<String, ScalarValue>,
+    /// Runtime filters from the UI filter bar, applied to every widget whose
+    /// cube they target (see `report::with_run_filters`).
+    #[serde(default)]
+    filters: Vec<Filter>,
 }
 
 /// POST /reports/{id}/run — run each bound widget's query under the report's
@@ -210,26 +214,32 @@ async fn report_run(
         }
     };
     let mut scope = report.scope.clone();
+    let mut run_filters: Vec<Filter> = Vec::new();
     if let Some(b) = body {
-        for (k, v) in b.into_inner().scope {
+        let b = b.into_inner();
+        for (k, v) in b.scope {
             scope.insert(k, v);
         }
+        run_filters = b.filters;
     }
     let ctx = SecurityContext { scope, ..Default::default() };
 
     let mut widgets = Vec::with_capacity(report.widgets.len());
     for w in &report.widgets {
         match &w.query {
-            Some(q) => match state.engine.run(&state.model, q, &ctx).await {
-                Ok(result) => widgets.push(spyglass::report::resolve_widget(w, Some(&result))),
-                // Keep the report renderable: surface the failure as a note.
-                Err(e) => widgets.push(serde_json::json!({
-                    "type": "note",
-                    "title": w.title,
-                    "w": w.w,
-                    "markdown": format!("⚠️ query failed: {e}"),
-                })),
-            },
+            Some(q) => {
+                let q = spyglass::report::with_run_filters(q, &run_filters);
+                match state.engine.run(&state.model, &q, &ctx).await {
+                    Ok(result) => widgets.push(spyglass::report::resolve_widget(w, Some(&result))),
+                    // Keep the report renderable: surface the failure as a note.
+                    Err(e) => widgets.push(serde_json::json!({
+                        "type": "note",
+                        "title": w.title,
+                        "w": w.w,
+                        "markdown": format!("⚠️ query failed: {e}"),
+                    })),
+                }
+            }
             None => widgets.push(spyglass::report::resolve_widget(w, None)),
         }
     }

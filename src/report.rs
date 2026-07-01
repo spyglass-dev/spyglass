@@ -7,10 +7,40 @@
 //! [`resolve_widget`] to bake the result into the widget — so the same report
 //! re-runs live against any workspace.
 
-use crate::query::{Query, QueryResult, ScalarValue};
+use crate::query::{Filter, Query, QueryResult, ScalarValue};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
+
+/// The cube a query targets, taken from its first member (measures, then
+/// dimensions, time dimensions, filters). `None` for an empty query.
+pub fn query_cube(q: &Query) -> Option<String> {
+    q.measures
+        .iter()
+        .chain(q.dimensions.iter())
+        .chain(q.time_dimensions.iter().map(|t| &t.dimension))
+        .chain(q.filters.iter().map(|f| &f.member))
+        .next()
+        .and_then(|m| m.split('.').next())
+        .map(|s| s.to_string())
+}
+
+/// Return a copy of `query` with the runtime `filters` that belong to its cube
+/// appended. Filters targeting a *different* cube are skipped, so a report-wide
+/// filter bar can pass every filter and each widget only gets the relevant ones
+/// (the compiler rejects cross-cube queries). This is how the UI filter bar
+/// narrows a whole report without rewriting each widget.
+pub fn with_run_filters(query: &Query, filters: &[Filter]) -> Query {
+    let mut q = query.clone();
+    if let Some(cube) = query_cube(query) {
+        for f in filters {
+            if f.member.split('.').next() == Some(cube.as_str()) {
+                q.filters.push(f.clone());
+            }
+        }
+    }
+    q
+}
 
 /// A report template: ordered widgets, each optionally bound to a query, plus a
 /// default tenant scope applied when running.
