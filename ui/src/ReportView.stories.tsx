@@ -2,40 +2,47 @@
  * Storybook stories for the reporting widgets. CSF3, framework-agnostic
  * (no hard Storybook import) so the package stays light; a workspace-level
  * Storybook can pick these up.
+ *
+ * Domain-agnostic sample data from the Pagila DVD-rental database
+ * (`tests/pagila/cubes/pagila.yml`) — Payments/Rentals/Customers/Films — so
+ * nothing here is tied to a specific host product.
  */
 import { ReportView } from './components/ReportView'
 import type { ReportDoc } from './types'
 
 const sample: ReportDoc = {
-  title: 'P5 English — Weekly Review',
-  description: 'Grading-first snapshot.',
+  title: 'Store performance — Q2',
+  description: 'Pagila rental store: revenue, rentals, and catalog at a glance.',
   widgets: [
-    { type: 'metric', value: 5, label: 'To grade', w: 1 },
-    { type: 'metric', value: 82, label: 'Completion', format: 'percent', w: 1, delta: { value: 5, trend: 'up', suffix: 'pp' } },
-    { type: 'metric', value: 74, label: 'Avg score', format: 'percent', w: 1 },
-    { type: 'metric', value: 3, label: 'At risk', w: 1 },
+    { type: 'metric', value: 30924, label: 'Revenue', format: 'currency', w: 1, delta: { value: 8, trend: 'up', suffix: 'pp' } },
+    { type: 'metric', value: 16044, label: 'Rentals', format: 'number', w: 1 },
+    { type: 'metric', value: 599, label: 'Active customers', format: 'number', w: 1 },
+    { type: 'metric', value: 4.3, label: 'Avg payment', format: 'currency', w: 1 },
     {
       type: 'chart',
-      title: 'Submissions by activity',
+      title: 'Revenue by film rating',
       w: 2,
-      chart: { mark: 'bar', x: 'activity', y: 'count', series: [
-        { activity: 'Essay 1', count: 18 },
-        { activity: 'Quiz 2', count: 12 },
-        { activity: 'Worksheet 3', count: 7 },
+      chart: { mark: 'bar', x: 'rating', y: 'revenue', format: 'currency', series: [
+        { rating: 'PG-13', revenue: 8730 },
+        { rating: 'NC-17', revenue: 7290 },
+        { rating: 'PG', revenue: 6560 },
+        { rating: 'R', revenue: 5140 },
+        { rating: 'G', revenue: 3204 },
       ] },
     },
     {
       type: 'table',
-      title: 'At-risk students',
+      title: 'Top customers by spend',
       w: 2,
       columns: [
-        { key: 'name', label: 'Student' },
-        { key: 'avg', label: 'Avg', format: 'percent', align: 'right' },
-        { key: 'missing', label: 'Missing', align: 'right' },
+        { key: 'name', label: 'Customer' },
+        { key: 'spend', label: 'Spend', format: 'currency', align: 'right' },
+        { key: 'rentals', label: 'Rentals', align: 'right' },
       ],
       rows: [
-        { name: 'Ben', avg: 41, missing: 3 },
-        { name: 'Cara', avg: 55, missing: 2 },
+        { name: 'Karl Seal', spend: 221.55, rentals: 45 },
+        { name: 'Eleanor Hunt', spend: 216.54, rentals: 46 },
+        { name: 'Clara Shaw', spend: 195.58, rentals: 42 },
       ],
     },
   ],
@@ -47,7 +54,7 @@ const meta = {
 }
 export default meta
 
-export const ClassReview = {
+export const StorePerformance = {
   render: () => <ReportView doc={sample} />,
 }
 
@@ -57,58 +64,62 @@ const charts: ReportDoc = {
   widgets: [
     {
       type: 'chart',
-      title: 'Submissions by status (stacked)',
+      title: 'Rentals by store (stacked)',
       w: 2,
       chart: {
         mark: 'bar',
-        x: 'week',
-        y: 'count',
-        color: 'status',
+        x: 'month',
+        y: 'rentals',
+        color: 'store',
         series: [
-          { week: 'W1', status: 'graded', count: 12 },
-          { week: 'W1', status: 'needs review', count: 4 },
-          { week: 'W2', status: 'graded', count: 15 },
-          { week: 'W2', status: 'needs review', count: 6 },
+          { month: 'Apr', store: 'Store 1', rentals: 1180 },
+          { month: 'Apr', store: 'Store 2', rentals: 1042 },
+          { month: 'May', store: 'Store 1', rentals: 1355 },
+          { month: 'May', store: 'Store 2', rentals: 1290 },
+          { month: 'Jun', store: 'Store 1', rentals: 1401 },
+          { month: 'Jun', store: 'Store 2', rentals: 1338 },
         ],
       },
     },
     {
       type: 'chart',
-      title: 'Avg score trend',
+      title: 'Revenue trend',
       w: 2,
       chart: {
         mark: 'line',
         x: 'date',
-        y: 'avg',
-        format: 'percent',
+        y: 'revenue',
+        format: 'currency',
         series: [
-          { date: '2026-04-01', avg: 68 },
-          { date: '2026-05-01', avg: 74 },
-          { date: '2026-06-01', avg: 81 },
+          { date: '2022-04-01', revenue: 9210 },
+          { date: '2022-05-01', revenue: 10870 },
+          { date: '2022-06-01', revenue: 10844 },
         ],
       },
     },
     {
       type: 'chart',
-      title: 'Raw Vega-Lite (heatmap)',
+      title: 'Raw Vega-Lite (film catalog heatmap)',
       w: 4,
       chart: {
         mark: 'bar',
-        y: 'v',
+        y: 'films',
         series: [
-          { student: 'Ada', skill: 'Grammar', v: 3 },
-          { student: 'Ada', skill: 'Fluency', v: 2 },
-          { student: 'Ben', skill: 'Grammar', v: 1 },
-          { student: 'Ben', skill: 'Fluency', v: 4 },
+          { rating: 'G', duration: '3 days', films: 34 },
+          { rating: 'G', duration: '5 days', films: 41 },
+          { rating: 'PG', duration: '3 days', films: 52 },
+          { rating: 'PG', duration: '5 days', films: 38 },
+          { rating: 'R', duration: '3 days', films: 29 },
+          { rating: 'R', duration: '5 days', films: 46 },
         ],
         vlSpec: {
           mark: 'rect',
           encoding: {
-            x: { field: 'skill', type: 'nominal', title: null },
-            y: { field: 'student', type: 'nominal', title: null },
-            color: { field: 'v', type: 'quantitative', title: 'Mastery' },
+            x: { field: 'duration', type: 'nominal', title: null },
+            y: { field: 'rating', type: 'nominal', title: null },
+            color: { field: 'films', type: 'quantitative', title: 'Films' },
           },
-          height: 120,
+          height: 140,
         },
       },
     },
