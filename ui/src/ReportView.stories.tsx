@@ -50,3 +50,71 @@ export default meta
 export const ClassReview = {
   render: () => <ReportView doc={sample} />,
 }
+
+const charts: ReportDoc = {
+  title: 'Chart gallery',
+  description: 'Vega-Lite behind the compact ChartSpec, plus a raw vlSpec.',
+  widgets: [
+    {
+      type: 'chart',
+      title: 'Submissions by status (stacked)',
+      w: 2,
+      chart: {
+        mark: 'bar',
+        x: 'week',
+        y: 'count',
+        color: 'status',
+        series: [
+          { week: 'W1', status: 'graded', count: 12 },
+          { week: 'W1', status: 'needs review', count: 4 },
+          { week: 'W2', status: 'graded', count: 15 },
+          { week: 'W2', status: 'needs review', count: 6 },
+        ],
+      },
+    },
+    {
+      type: 'chart',
+      title: 'Avg score trend',
+      w: 2,
+      chart: {
+        mark: 'line',
+        x: 'date',
+        y: 'avg',
+        format: 'percent',
+        series: [
+          { date: '2026-04-01', avg: 68 },
+          { date: '2026-05-01', avg: 74 },
+          { date: '2026-06-01', avg: 81 },
+        ],
+      },
+    },
+    {
+      type: 'chart',
+      title: 'Raw Vega-Lite (heatmap)',
+      w: 4,
+      chart: {
+        mark: 'bar',
+        y: 'v',
+        series: [
+          { student: 'Ada', skill: 'Grammar', v: 3 },
+          { student: 'Ada', skill: 'Fluency', v: 2 },
+          { student: 'Ben', skill: 'Grammar', v: 1 },
+          { student: 'Ben', skill: 'Fluency', v: 4 },
+        ],
+        vlSpec: {
+          mark: 'rect',
+          encoding: {
+            x: { field: 'skill', type: 'nominal', title: null },
+            y: { field: 'student', type: 'nominal', title: null },
+            color: { field: 'v', type: 'quantitative', title: 'Mastery' },
+          },
+          height: 120,
+        },
+      },
+    },
+  ],
+}
+
+export const ChartGallery = {
+  render: () => <ReportView doc={charts} />,
+}

@@ -40,7 +40,7 @@ export interface TableSpec extends WidgetBase {
   rows: Record<string, unknown>[]
 }
 
-export type ChartMark = 'bar' | 'line' | 'area' | 'progress'
+export type ChartMark = 'bar' | 'line' | 'area' | 'point' | 'progress'
 
 export interface ChartSpec extends WidgetBase {
   type: 'chart'
@@ -51,9 +51,20 @@ export interface ChartSpec extends WidgetBase {
     /** Value/y field name within each series row. */
     y: string
     series: Record<string, unknown>[]
+    /** Optional field to split into colored series — grouped/stacked bars,
+     *  multi-line charts, etc. */
+    color?: string
+    /** For bar/area with `color`: stack the series (default). `false` groups
+     *  them side-by-side instead. */
+    stack?: boolean
     /** For `progress`: the max value (defaults to 100). */
     max?: number
     format?: ValueFormat
+    /** Escape hatch: a full Vega-Lite spec. When present it renders directly
+     *  (with `series` injected as the default `data.values` if the spec omits
+     *  its own data) and `mark`/`x`/`y`/`color` are ignored. Use for charts the
+     *  compact encoding can't express (layered, faceted, heatmaps, dual-axis). */
+    vlSpec?: Record<string, unknown>
   }
 }
 
