@@ -51,7 +51,7 @@ curl -s localhost:8088/query \
           "measures": ["Orders.revenue"],
           "dimensions": ["Orders.status"]
         },
-        "scope": { "tenant_id": "ws_123" }
+        "scope": { "Orders.tenant_id": "ws_123" }
       }'
 ```
 
@@ -81,6 +81,27 @@ the caller.
 | `GET /reports` · `POST /reports` | List / save bound reports. |
 | `GET /reports/{id}` | A saved report template. |
 | `POST /reports/{id}/run` | Run a report's bound queries under a scope → a data-bearing [`ReportDoc`](./widgets.md). |
+
+A UI builds queries from `GET /meta` — cubes with their members, types, and the
+tenant flag, and no SQL:
+
+```jsonc
+{
+  "cubes": [
+    {
+      "name": "Orders",
+      "title": "Orders",
+      "measures": [
+        { "name": "revenue", "member": "Orders.revenue", "type": "sum", "format": "currency" }
+      ],
+      "dimensions": [
+        { "name": "tenant_id", "member": "Orders.tenant_id", "type": "string", "tenant": true },
+        { "name": "status",    "member": "Orders.status",    "type": "string", "tenant": false }
+      ]
+    }
+  ]
+}
+```
 
 `spyglass-server validate` (no server, no DB) loads the cube directory and
 reports cubes/measures/dimensions — for CI or an agent self-checking generated

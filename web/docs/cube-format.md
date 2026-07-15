@@ -86,6 +86,7 @@ Measures are **aggregations**.
 | `count` | row count (ignores `sql`) |
 | `count_distinct` | distinct count of `sql` |
 | `sum` / `avg` / `min` / `max` | aggregation over the numeric `sql` |
+| `number` | a raw numeric `sql` expression with **no** aggregation wrapper |
 
 For a **conditional count** ("rows meeting a condition"), use `sum` with a
 `case` expression — a plain `count` ignores its `sql`:
@@ -105,6 +106,29 @@ via the [`SecurityContext`](./querying.md#scope) and Spyglass injects it as a
 mandatory `WHERE` filter on every query. A cube without a tenant dimension can't
 be safely queried in a multi-tenant deployment.
 
+## File forms the loader accepts
+
+The loader (it reads every `*.yml` / `*.yaml` / `*.json` in a directory and
+merges them) accepts three equivalent shapes:
+
+1. **`cubes:` map** (above) — keyed by cube name.
+2. **Canonical Cube list form** — `cubes`, `dimensions`, and `measures` as
+   sequences of `{ name, … }`. This is what [Cube](https://github.com/cube-js/cube)
+   emits, and what a distri agent may generate; it loads as-is:
+
+   ```yaml
+   cubes:
+     - name: Orders
+       sql_table: orders
+       dimensions:
+         - { name: tenant_id, type: string, sql: tenant_id, tenant: true }
+       measures:
+         - { name: count, type: count }
+   ```
+3. **Single cube per file** — a top-level `name:` with no `cubes:` wrapper.
+
+The name comes from the map key (form 1) or the `name:` field (forms 2–3).
+
 ## Rules of thumb
 
 - **Never invent columns** — use only what the schema actually has.
@@ -113,5 +137,5 @@ be safely queried in a multi-tenant deployment.
   agents and the UI reference them by `Cube.member`.
 
 See the full working example in
-[`examples/example.yml`](https://github.com/distri-ai/spyglass/blob/main/examples/example.yml),
+[`examples/example.yml`](https://github.com/spyglass-dev/spyglass/blob/main/examples/example.yml),
 or let [distri generate cubes](./generating-cubes.md) from your own database.

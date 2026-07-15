@@ -19,7 +19,7 @@ Install the `spyglass-server` binary with cargo:
 
 ```bash
 cargo install spyglass                       # from crates.io
-cargo install --git https://github.com/distri-ai/spyglass spyglass   # from git
+cargo install --git https://github.com/spyglass-dev/spyglass spyglass   # from git
 
 # from a local checkout (run in the repo root):
 cargo install --bin spyglass-server --path . --force --locked --debug
@@ -32,6 +32,48 @@ iterating. This puts `spyglass-server` on your `PATH`, so the commands below can
 be run as `spyglass-server …` directly. To embed the **library** instead of the binary,
 add the crate as a dependency (see [Embedding the crate](#embedding-the-crate)).
 
+## See it in action — the Pagila demo
+
+The fastest way to see Spyglass working end-to-end is the committed
+[**Pagila**](https://github.com/devrimgunduz/pagila) harness (the canonical
+Postgres sample DB — a DVD-rental store). It downloads the dataset into Docker,
+serves cubes, and ships sample reports. Pagila has **two stores**, used as the
+tenant (`store_id`) to demonstrate Spyglass's mandatory scope isolation.
+
+```bash
+tests/pagila/setup.sh                      # download + load Pagila into Docker (~10s)
+make ui DIR=tests/pagila || pnpm --filter @spyglass/studio build  # build the Studio UI
+cargo run --features ui --bin spyglass-server -- -C tests/pagila serve
+# open http://127.0.0.1:8089
+```
+
+(Or skip the UI build and just `cargo run --bin spyglass-server -- -C tests/pagila serve`
+— `/` then serves a zero-build explorer with the same views.)
+
+**Browse the cube catalog** (`/meta`) — measures, dimensions, and the `tenant`
+key per cube:
+
+![Studio — cube catalog](/img/studio-cubes.png)
+
+**Build a query** point-and-click — pick a cube + measures/dimensions, run it,
+see the rows and the compiled SQL:
+
+![Studio — query builder](/img/studio-query.png)
+
+**Run a report** — the sample reports resolve their bound queries live under the
+current scope (here, store 1 — change the scope box to compare store 2):
+
+![Studio — reports](/img/studio-reports.png)
+
+Then poke at it from the shell:
+
+```bash
+tests/pagila/validate.sh        # smoke-test cubes + assert store 1 ≠ store 2
+```
+
+Full walkthrough (including the distri analyze→report pipeline) lives in
+[`tests/pagila/README.md`](https://github.com/spyglass-dev/spyglass/tree/main/tests/pagila).
+
 ## 1. Configure your environment
 
 Copy the sample env file and point it at your database:
@@ -39,13 +81,14 @@ Copy the sample env file and point it at your database:
 ```bash
 cp .env.sample .env
 # edit DATABASE_URL=postgres://user:password@localhost:5432/mydb
-set -a; source .env; set +a   # the binary reads the environment; it does not auto-load .env
+set -a; source .env; set +a   # optional — spyglass-server also auto-loads .env (via dotenvy)
 ```
 
 | Variable | Required | Default | Used by |
 |----------|----------|---------|---------|
 | `DATABASE_URL` | ✅ | — | runtime + offline subcommands |
 | `REPORTING_CUBES` | | `./cubes` | `serve` (cube directory to load) |
+| `REPORTING_REPORTS` | | `./reports` | `serve` (saved-report directory, for `/reports`) |
 | `REPORTING_LOGS` | | `./logs` | `serve` (query log directory) |
 | `REPORTING_ADDR` | | `127.0.0.1:8088` | `serve` (bind address) |
 
@@ -60,7 +103,7 @@ cargo test -p spyglass
 
 ## 3. Serve the demo cubes
 
-The repo ships generic example cubes in [`examples/`](https://github.com/distri-ai/spyglass/tree/main/examples).
+The repo ships generic example cubes in [`examples/`](https://github.com/spyglass-dev/spyglass/tree/main/examples).
 Point `REPORTING_CUBES` at it and start the server:
 
 ```bash
@@ -75,7 +118,7 @@ curl -s localhost:8088/query \
   -H 'content-type: application/json' \
   -d '{
         "query": { "measures": ["Orders.revenue"], "dimensions": ["Orders.status"] },
-        "scope": { "tenant_id": "ws_123" }
+        "scope": { "Orders.tenant_id": "ws_123" }
       }'
 ```
 

@@ -55,7 +55,7 @@ Install the `spyglass-server` binary with cargo:
 
 ```bash
 cargo install spyglass                       # from crates.io
-cargo install --git https://github.com/distri-ai/spyglass spyglass   # from git
+cargo install --git https://github.com/spyglass-dev/spyglass spyglass   # from git
 
 # from a local checkout (run in the repo root):
 cargo install --bin spyglass-server --path . --force --locked --debug
@@ -78,7 +78,7 @@ With the binary installed (or run it from a checkout with `cargo run -p spyglass
 cp .env.sample .env                # set DATABASE_URL
 set -a; source .env; set +a        # the binary reads the environment
 
-REPORTING_CUBES=./examples spyglass-server      # serve POST /query (TLS)
+REPORTING_CUBES=./examples spyglass-server      # serve POST /query  (Postgres client over TLS)
 ```
 
 From a source checkout instead:
@@ -86,13 +86,13 @@ From a source checkout instead:
 ```bash
 cargo test -p spyglass             # pure compiler tests, no DB
 REPORTING_CUBES=./examples \
-  cargo run -p spyglass --bin spyglass-server   # serve POST /query (TLS)
+  cargo run -p spyglass --bin spyglass-server   # serve POST /query  (Postgres client over TLS)
 ```
 
 ```bash
 curl -s localhost:8088/query -H 'content-type: application/json' -d '{
   "query": { "measures": ["Orders.revenue"], "dimensions": ["Orders.status"] },
-  "scope": { "tenant_id": "ws_123" }
+  "scope": { "Orders.tenant_id": "ws_123" }
 }'
 ```
 
