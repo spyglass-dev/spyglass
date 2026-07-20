@@ -15,7 +15,55 @@ import {
   type QueryFilter,
   type QueryResultLite,
 } from './querybuilder'
-import { resolveDateRange, hasActiveFilters, type ReportFilters } from './filters'
+import { resolveDateRange, hasActiveFilters, type FilterFacet, type ReportFilters } from './filters'
+
+// ── Filter spec (declared filters) ───────────────────────────────────────────
+
+/**
+ * A facet a report DECLARES — *what* filters the report offers and which are
+ * mandatory. Distinct from `ReportFilters`, which holds the *selected values*.
+ * A report carries a `facets` array of these; the host turns them into live
+ * `FilterFacet` controls with `resolveFacets`, binding dynamic option lists.
+ */
+export interface FacetSpec {
+  /** Dimension key the host filters on (e.g. `status`, `class_id`). */
+  key: string
+  label: string
+  /** Mandatory — always shown, prompted until set (host may auto-pick). */
+  required?: boolean
+  /** Always shown on the bar (not tucked behind "+ Filter"), but not prompted. */
+  alwaysOn?: boolean
+  /** Single-select (default: multi). */
+  single?: boolean
+  /** Force the control style (default: chips ≤6 options, menu otherwise). */
+  variant?: 'chips' | 'menu'
+  /** Inline static options (e.g. a fixed status list). */
+  options?: { value: string; label: string }[]
+  /** Name of a dynamic option list the host binds at render (e.g. `classes`).
+   *  Kept out of the doc so options stay live, not frozen. */
+  source?: string
+}
+
+/**
+ * Resolve declared facet specs into live `FilterFacet` controls, binding each
+ * spec's `source` to a host-supplied option list. A spec with inline `options`
+ * uses those; one with a `source` pulls from `sources[source]` (empty until the
+ * host loads it).
+ */
+export function resolveFacets(
+  specs: FacetSpec[] | undefined,
+  sources?: Record<string, { value: string; label: string }[]>,
+): FilterFacet[] {
+  return (specs ?? []).map((f) => ({
+    key: f.key,
+    label: f.label,
+    required: f.required,
+    alwaysOn: f.alwaysOn,
+    single: f.single,
+    variant: f.variant,
+    options: f.options ?? (f.source ? sources?.[f.source] ?? [] : []),
+  }))
+}
 
 // ── The source report (what a host stores / an agent authors) ────────────────
 
@@ -44,6 +92,9 @@ export interface Report {
   title: string
   description?: string
   widgets: ReportWidget[]
+  /** Declared filters — what facets the report offers + which are mandatory. */
+  facets?: FacetSpec[]
+  /** Selected filter values (date range + facet selections). */
   filters?: ReportFilters
 }
 
