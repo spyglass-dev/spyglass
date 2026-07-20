@@ -9,12 +9,19 @@
  * contract and call sites are unchanged either way.
  */
 import { lazy, Suspense, useMemo } from 'react'
-import type { VisualizationSpec } from 'react-vega'
+import type { VegaEmbedProps } from 'react-vega'
 import { type ChartSpec, type ValueFormat } from '../types'
 
 // Lazy-load react-vega (and Vega) so the heavy renderer is only fetched when a
-// chart actually renders — keeps it out of the host's initial bundle.
-const VegaLite = lazy(() => import('react-vega').then((m) => ({ default: m.VegaLite })))
+// chart actually renders — keeps it out of the host's initial bundle. react-vega
+// 8 exposes `VegaEmbed` (spec + options) rather than the old `VegaLite`.
+const VegaEmbed = lazy(() => import('react-vega').then((m) => ({ default: m.VegaEmbed })))
+
+/** A Vega-Lite spec as a plain JSON object (cast to react-vega's spec type at
+ *  the render boundary). */
+type VlSpec = Record<string, unknown>
+
+const EMBED_OPTIONS = { actions: false, renderer: 'svg', mode: 'vega-lite' } as const
 
 function nums(series: Record<string, unknown>[], key: string): number[] {
   return series.map((r) => {
@@ -63,7 +70,7 @@ function xType(
 }
 
 /** Compile a compact `ChartSpec.chart` into a Vega-Lite spec. */
-function toVegaLite(chart: ChartSpec['chart']): VisualizationSpec {
+function toVegaLite(chart: ChartSpec['chart']): VlSpec {
   const { mark, x, y, color, stack, format } = chart
   // Synthesize an index field when no x is given (parity with label fallback).
   const hasX = Boolean(x)
@@ -87,14 +94,14 @@ function toVegaLite(chart: ChartSpec['chart']): VisualizationSpec {
   }
 
   return {
-    $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+    $schema: 'https://vega.github.io/schema/vega-lite/v6.json',
     data: { values },
     mark: { type: vmark, tooltip: true, ...(mark === 'point' ? { filled: true } : {}) },
     encoding,
     width: 'container',
     height: 220,
     autosize: { type: 'fit', contains: 'padding' },
-  } as VisualizationSpec
+  }
 }
 
 export function Chart({ spec }: { spec: ChartSpec }) {
@@ -102,14 +109,14 @@ export function Chart({ spec }: { spec: ChartSpec }) {
 
   // Raw Vega-Lite escape hatch — render verbatim, injecting series as the
   // default dataset when the spec doesn't carry its own data.
-  const rawSpec = useMemo<VisualizationSpec | null>(() => {
+  const rawSpec = useMemo<VlSpec | null>(() => {
     if (!vlSpec) return null
-    const s = { width: 'container', ...vlSpec } as Record<string, unknown>
+    const s = { width: 'container', ...vlSpec } as VlSpec
     if (!('data' in s)) s.data = { values: series }
-    return s as VisualizationSpec
+    return s
   }, [vlSpec, series])
 
-  const compiled = useMemo<VisualizationSpec | null>(
+  const compiled = useMemo<VlSpec | null>(
     () => (vlSpec || mark === 'progress' || series.length === 0 ? null : toVegaLite(spec.chart)),
     [vlSpec, mark, series, spec.chart],
   )
@@ -122,7 +129,7 @@ export function Chart({ spec }: { spec: ChartSpec }) {
     return (
       <div style={{ width: '100%' }}>
         <Suspense fallback={null}>
-          <VegaLite spec={rawSpec} actions={false} renderer="svg" onError={() => {}} />
+          <VegaEmbed spec={rawSpec as VegaEmbedProps['spec']} options={EMBED_OPTIONS} onError={() => {}} style={{ width: '100%' }} />
         </Suspense>
       </div>
     )
@@ -155,7 +162,7 @@ export function Chart({ spec }: { spec: ChartSpec }) {
     <div style={{ width: '100%' }}>
       {compiled && (
         <Suspense fallback={null}>
-          <VegaLite spec={compiled} actions={false} renderer="svg" onError={() => {}} />
+          <VegaEmbed spec={compiled as VegaEmbedProps['spec']} options={EMBED_OPTIONS} onError={() => {}} style={{ width: '100%' }} />
         </Suspense>
       )}
     </div>
