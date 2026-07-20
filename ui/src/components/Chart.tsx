@@ -69,6 +69,12 @@ function xType(
   return allDate ? 'temporal' : 'nominal'
 }
 
+/** Escape dots in a field name so Vega-Lite treats it as a flat key, not a
+ *  nested accessor. Our members look like `Submissions.submitted` but the row
+ *  keys are flat, so an unescaped dot would look up `datum.Submissions.submitted`
+ *  (undefined) and render an empty chart. */
+const esc = (field: string) => field.replace(/\./g, '\\.')
+
 /** Compile a compact `ChartSpec.chart` into a Vega-Lite spec. */
 function toVegaLite(chart: ChartSpec['chart']): VlSpec {
   const { mark, x, y, color, stack, format } = chart
@@ -79,14 +85,14 @@ function toVegaLite(chart: ChartSpec['chart']): VlSpec {
 
   const vmark = mark === 'progress' ? 'bar' : mark
   const encoding: Record<string, unknown> = {
-    x: { field: xField, type: xType(values, hasX ? xField : undefined, mark), title: null },
-    y: { field: y, type: 'quantitative', title: null, axis: valueAxis(format) },
+    x: { field: esc(xField), type: xType(values, hasX ? xField : undefined, mark), title: null },
+    y: { field: esc(y), type: 'quantitative', title: null, axis: valueAxis(format) },
   }
   if (color) {
-    encoding.color = { field: color, type: 'nominal', title: null }
+    encoding.color = { field: esc(color), type: 'nominal', title: null }
     // Grouped bars: offset by the color field and don't stack.
     if (mark === 'bar' && stack === false) {
-      encoding.xOffset = { field: color }
+      encoding.xOffset = { field: esc(color) }
       ;(encoding.y as Record<string, unknown>).stack = null
     } else if ((mark === 'bar' || mark === 'area') && stack === false) {
       ;(encoding.y as Record<string, unknown>).stack = null
