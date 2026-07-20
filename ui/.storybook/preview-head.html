@@ -1,0 +1,58 @@
+<!--
+  Storybook preview head. @spyglass/ui components are styled with Tailwind
+  utility classes + shadcn-style semantic design tokens (bg-card, text-foreground,
+  …). The library ships no Tailwind of its own — the CONSUMER provides it. For
+  the Storybook preview we stand that in with the Tailwind Play CDN plus the
+  token variables, so stories render the way a host app would show them.
+-->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: ['class', '[data-theme="dark"]'],
+    theme: {
+      extend: {
+        colors: {
+          background: 'hsl(var(--background))',
+          foreground: 'hsl(var(--foreground))',
+          card: 'hsl(var(--card))',
+          'card-foreground': 'hsl(var(--card-foreground))',
+          popover: 'hsl(var(--popover))',
+          'popover-foreground': 'hsl(var(--popover-foreground))',
+          primary: 'hsl(var(--primary))',
+          'primary-foreground': 'hsl(var(--primary-foreground))',
+          secondary: 'hsl(var(--secondary))',
+          'secondary-foreground': 'hsl(var(--secondary-foreground))',
+          muted: 'hsl(var(--muted))',
+          'muted-foreground': 'hsl(var(--muted-foreground))',
+          accent: 'hsl(var(--accent))',
+          'accent-foreground': 'hsl(var(--accent-foreground))',
+          border: 'hsl(var(--border))',
+          input: 'hsl(var(--input))',
+          ring: 'hsl(var(--ring))',
+        },
+      },
+    },
+  }
+</script>
+<style>
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 224 20% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 20% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 20% 12%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 224 20% 12%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 220 14% 96%;
+    --accent-foreground: 224 20% 12%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 221 83% 53%;
+  }
+  body { background: hsl(var(--background)); color: hsl(var(--foreground)); }
+</style>
