@@ -30,7 +30,8 @@ function useClickAway(ref: React.RefObject<HTMLElement | null>, onAway: () => vo
   }, [ref, onAway])
 }
 
-const facetIsMenu = (f: FilterFacet) => f.variant === 'menu' || (f.variant !== 'chips' && f.options.length > 6)
+const facetIsMenu = (f: FilterFacet) =>
+  f.variant === 'menu' || (f.variant !== 'chips' && (f.options?.length ?? 0) > 6)
 
 export function FilterBar({
   filters,
@@ -97,7 +98,7 @@ export function FilterBar({
               {facet.label}
               {facet.required && <span className="ml-0.5 text-amber-500">*</span>}
             </span>
-            {facet.options.map((o) => {
+            {(facet.options ?? []).map((o) => {
               const on = selected(facet.key).includes(o.value)
               const prompt = facet.required && selected(facet.key).length === 0
               return (
@@ -160,10 +161,11 @@ function FacetMenu({
   const ref = useRef<HTMLDivElement>(null)
   useClickAway(ref, () => setOpen(false))
 
+  const all = facet.options ?? []
   const opts = useMemo(() => {
     const s = q.trim().toLowerCase()
-    return s ? facet.options.filter((o) => o.label.toLowerCase().includes(s)) : facet.options
-  }, [facet.options, q])
+    return s ? all.filter((o) => o.label.toLowerCase().includes(s)) : all
+  }, [all, q])
 
   const count = selected.length
   const prompt = facet.required && count === 0
@@ -171,7 +173,7 @@ function FacetMenu({
     count === 0
       ? facet.label
       : count === 1
-        ? facet.options.find((o) => o.value === selected[0])?.label ?? `1 ${facet.label}`
+        ? all.find((o) => o.value === selected[0])?.label ?? `1 ${facet.label}`
         : `${count} ${facet.label}s`
 
   return (

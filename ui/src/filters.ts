@@ -30,13 +30,19 @@ export interface ReportFilters {
   facets?: Record<string, string[]>
 }
 
-/** A pickable facet the FilterBar renders. Small option sets show as a chip
- *  group; larger ones (or `variant: 'menu'`) show as a searchable dropdown. */
+/**
+ * A facet — both what a report DECLARES and what the `FilterBar` renders (one
+ * type, no declared/resolved split). Small option sets show as a chip group;
+ * larger ones (or `variant: 'menu'`) as a searchable dropdown. A facet can carry
+ * inline `options`, or name a dynamic `source` the host binds via `resolveFacets`
+ * before render.
+ */
 export interface FilterFacet {
   /** Dimension key the host filters on (e.g. `status`, `class_id`). */
   key: string
   label: string
-  options: { value: string; label: string }[]
+  /** Selectable options. Omit when the host binds a dynamic list via `source`. */
+  options?: { value: string; label: string }[]
   /** Mandatory — always shown, and prompted (amber) until a value is picked. */
   required?: boolean
   /** Always shown on the bar (not tucked behind "+ Add filter"), but not
@@ -46,6 +52,9 @@ export interface FilterFacet {
   single?: boolean
   /** Force the render style. Default: chips for ≤6 options, menu otherwise. */
   variant?: 'chips' | 'menu'
+  /** Name of a dynamic option list the host binds at render (e.g. `classes`).
+   *  Kept out of the frozen doc so options stay live. */
+  source?: string
 }
 
 /** The default filters a new report starts with — a bounded, recent window. */
