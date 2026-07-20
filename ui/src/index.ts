@@ -7,9 +7,12 @@
  */
 export * from './types'
 export * from './registry'
+export * from './filters'
 export { Widget } from './components/Widget'
 export { ReportView } from './components/ReportView'
 export { Metric } from './components/Metric'
 export { DataTable } from './components/DataTable'
 export { Chart } from './components/Chart'
 export { Note } from './components/Note'
+export { FilterBar } from './components/FilterBar'
+export { DateRangePicker } from './components/DateRangePicker'
