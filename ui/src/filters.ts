@@ -42,6 +42,8 @@ export interface FilterFacet {
   /** Always shown on the bar (not tucked behind "+ Add filter"), but not
    *  prompted. `required` implies this. */
   alwaysOn?: boolean
+  /** Single-select — picking a value replaces the selection (default: multi). */
+  single?: boolean
   /** Force the render style. Default: chips for ≤6 options, menu otherwise. */
   variant?: 'chips' | 'menu'
 }

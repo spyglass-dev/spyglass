@@ -7,10 +7,17 @@
  * `ReportFilters` object; the host maps that onto its own queries. Tailwind
  * design tokens, so it sits natively in the host's chrome.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { X, Check, ChevronDown, Plus, Search } from 'lucide-react'
 import { DateRangePicker } from './DateRangePicker'
 import { hasActiveFilters, type FilterFacet, type ReportFilters } from '../filters'
+
+/** Host control for a facet: receives the current values + a setter, returns a
+ *  node to render in place of the default chips/menu (e.g. a native combobox). */
+export type FacetRenderer = (
+  facet: FilterFacet,
+  api: { values: string[]; setValues: (next: string[]) => void },
+) => ReactNode | undefined
 
 /** Close `ref`'s popup when a click lands outside it. */
 function useClickAway(ref: React.RefObject<HTMLElement | null>, onAway: () => void) {
@@ -30,6 +37,7 @@ export function FilterBar({
   onChange,
   facets = [],
   onReset,
+  renderFacet,
 }: {
   filters: ReportFilters
   onChange: (next: ReportFilters) => void
@@ -37,6 +45,9 @@ export function FilterBar({
   facets?: FilterFacet[]
   /** Called by "Clear" — host decides what "reset" means (usually defaults). */
   onReset?: () => void
+  /** Override the control for specific facets with a host component (e.g. a
+   *  system combobox). Return `undefined` to keep the default chips/menu. */
+  renderFacet?: FacetRenderer
 }) {
   const selected = (key: string): string[] => filters.facets?.[key] ?? []
   const setValues = (key: string, next: string[]) => {
@@ -45,9 +56,13 @@ export function FilterBar({
     else delete map[key]
     onChange({ ...filters, facets: map })
   }
-  const toggle = (key: string, value: string) => {
-    const cur = selected(key)
-    setValues(key, cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value])
+  const toggle = (facet: FilterFacet, value: string) => {
+    const cur = selected(facet.key)
+    if (facet.single) {
+      setValues(facet.key, cur.includes(value) ? [] : [value])
+      return
+    }
+    setValues(facet.key, cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value])
   }
 
   // Optional facets the teacher has revealed via "+ Add filter" this session.
@@ -61,14 +76,20 @@ export function FilterBar({
     <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-background/95 px-4 py-2.5 backdrop-blur sm:px-6">
       <DateRangePicker filters={filters} onChange={onChange} />
 
-      {visibleFacets.map((facet) =>
-        facetIsMenu(facet) ? (
+      {visibleFacets.map((facet) => {
+        const custom = renderFacet?.(facet, {
+          values: selected(facet.key),
+          setValues: (next) => setValues(facet.key, next),
+        })
+        if (custom !== undefined && custom !== null) return <Fragment key={facet.key}>{custom}</Fragment>
+        return facetIsMenu(facet) ? (
           <FacetMenu
             key={facet.key}
             facet={facet}
             selected={selected(facet.key)}
-            onToggle={(v) => toggle(facet.key, v)}
+            onToggle={(v) => toggle(facet, v)}
             onClear={() => setValues(facet.key, [])}
+            closeOnPick={facet.single}
           />
         ) : (
           <div key={facet.key} className="flex items-center gap-1.5">
@@ -83,7 +104,7 @@ export function FilterBar({
                 <button
                   key={o.value}
                   type="button"
-                  onClick={() => toggle(facet.key, o.value)}
+                  onClick={() => toggle(facet, o.value)}
                   className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
                     on
                       ? 'border-primary bg-primary/10 text-primary'
@@ -97,8 +118,8 @@ export function FilterBar({
               )
             })}
           </div>
-        ),
-      )}
+        )
+      })}
 
       {hiddenFacets.length > 0 && (
         <AddFilterMenu facets={hiddenFacets} onAdd={(key) => setRevealed((r) => [...r, key])} />
@@ -126,11 +147,13 @@ function FacetMenu({
   selected,
   onToggle,
   onClear,
+  closeOnPick,
 }: {
   facet: FilterFacet
   selected: string[]
   onToggle: (value: string) => void
   onClear: () => void
+  closeOnPick?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
@@ -194,7 +217,10 @@ function FacetMenu({
                 <button
                   key={o.value}
                   type="button"
-                  onClick={() => onToggle(o.value)}
+                  onClick={() => {
+                    onToggle(o.value)
+                    if (closeOnPick) setOpen(false)
+                  }}
                   className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-muted"
                 >
                   <span
