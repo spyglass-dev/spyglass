@@ -79,6 +79,39 @@ limit 100";
 }
 
 #[test]
+fn rejects_unscoped_tenant_cube() {
+    // Fail closed: a cube with a tenant dimension refuses to compile without a
+    // scope value for it — no silent cross-tenant read.
+    let model = submissions_model();
+    let query = Query {
+        measures: vec!["Submissions.count".into()],
+        ..Default::default()
+    };
+    let err = spyglass::compile(&model, &query, &SecurityContext::default()).unwrap_err();
+    match err {
+        spyglass::CompileError::MissingTenantScope { cube, dimension } => {
+            assert_eq!(cube, "Submissions");
+            assert_eq!(dimension, "workspace_id");
+        }
+        other => panic!("expected MissingTenantScope, got {other:?}"),
+    }
+}
+
+#[test]
+fn allow_unscoped_bypasses_tenant_requirement() {
+    // The explicit admin/offline opt-in lets a tenant cube compile unscoped.
+    let model = submissions_model();
+    let query = Query {
+        measures: vec!["Submissions.count".into()],
+        ..Default::default()
+    };
+    let ctx = SecurityContext::default().allow_unscoped();
+    let c = spyglass::compile(&model, &query, &ctx).expect("compiles unscoped");
+    assert!(!c.sql.contains("where"), "should have no scope filter: {}", c.sql);
+    assert!(c.params.is_empty());
+}
+
+#[test]
 fn scope_is_always_injected_even_with_no_filters() {
     let model = submissions_model();
     let query = Query {
@@ -105,7 +138,8 @@ fn time_dimension_truncates_and_ranges() {
         order: vec![Order { member: "Submissions.created_at".into(), desc: false }],
         ..Default::default()
     };
-    let ctx = SecurityContext::default();
+    // Not exercising scope here — read across tenants explicitly.
+    let ctx = SecurityContext::default().allow_unscoped();
     let c = spyglass::compile(&model, &query, &ctx).expect("compiles");
     assert!(c.sql.contains("date_trunc('day', created_at)::text as \"Submissions.created_at\""), "{}", c.sql);
     assert!(c.sql.contains("created_at >= $1"), "{}", c.sql);
@@ -142,7 +176,7 @@ fn in_filter_expands_placeholders() {
         }],
         ..Default::default()
     };
-    let c = spyglass::compile(&model, &query, &SecurityContext::default()).expect("compiles");
+    let c = spyglass::compile(&model, &query, &SecurityContext::default().allow_unscoped()).expect("compiles");
     assert!(c.sql.contains("status in ($1, $2)"), "{}", c.sql);
     assert_eq!(c.params.len(), 2);
 }
@@ -212,7 +246,7 @@ cubes:
     // number tenant scope → ::numeric
     let mut scope = BTreeMap::new();
     scope.insert("Sales.store_id".to_string(), ScalarValue::Int(2));
-    let ctx = SecurityContext { scope };
+    let ctx = SecurityContext { scope, ..Default::default() };
     let q: Query = serde_json::from_value(serde_json::json!({ "measures": ["Sales.count"] })).unwrap();
     let c = spyglass::compile(&model, &q, &ctx).unwrap();
     assert!(c.sql.contains("store_id = $1::numeric"), "{}", c.sql);
@@ -227,7 +261,7 @@ cubes:
         "timeDimensions": [{ "dimension": "Sales.sold_at", "dateRange": ["2026-01-01", "2026-02-01"] }]
     }))
     .unwrap();
-    let c2 = spyglass::compile(&model, &q2, &SecurityContext::default()).unwrap();
+    let c2 = spyglass::compile(&model, &q2, &SecurityContext::default().allow_unscoped()).unwrap();
     assert!(c2.sql.contains("active = $1::boolean"), "{}", c2.sql);
     assert!(c2.sql.contains("region = $2") && !c2.sql.contains("region = $2::"), "{}", c2.sql);
     assert!(c2.sql.contains("sold_at >= $3::timestamptz"), "{}", c2.sql);
@@ -257,7 +291,7 @@ cubes:
     let mut scope = BTreeMap::new();
     scope.insert("Orders.workspace_id".to_string(), ScalarValue::String("w1".into()));
     scope.insert("Events.workspace_id".to_string(), ScalarValue::String("w1".into()));
-    let ctx = SecurityContext { scope };
+    let ctx = SecurityContext { scope, ..Default::default() };
     let query: Query = serde_json::from_value(serde_json::json!({
         "measures": ["Orders.count"]
     }))

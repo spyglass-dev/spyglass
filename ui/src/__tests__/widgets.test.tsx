@@ -7,9 +7,9 @@ import type { WidgetRegistry } from '../registry'
 
 describe('reporting widgets', () => {
   it('renders a metric value with percent format', () => {
-    render(<Widget spec={{ type: 'metric', value: 82, format: 'percent', label: 'Completion' }} />)
+    render(<Widget spec={{ type: 'metric', value: 82, format: 'percent', label: 'Return rate' }} />)
     expect(screen.getByText('82%')).toBeTruthy()
-    expect(screen.getByText('Completion')).toBeTruthy()
+    expect(screen.getByText('Return rate')).toBeTruthy()
   })
 
   it('renders a table cell from JSON rows', () => {
@@ -17,27 +17,27 @@ describe('reporting widgets', () => {
       <Widget
         spec={{
           type: 'table',
-          columns: [{ key: 'name', label: 'Student' }, { key: 'avg', label: 'Avg', format: 'percent' }],
-          rows: [{ name: 'Ada', avg: 88 }],
+          columns: [{ key: 'name', label: 'Customer' }, { key: 'spend', label: 'Spend', format: 'currency' }],
+          rows: [{ name: 'Karl Seal', spend: 221 }],
         }}
       />,
     )
-    expect(screen.getByText('Ada')).toBeTruthy()
-    expect(screen.getByText('88%')).toBeTruthy()
+    expect(screen.getByText('Karl Seal')).toBeTruthy()
+    expect(screen.getByText('$221.00')).toBeTruthy()
   })
 
   it('renders a full ReportDoc with title', () => {
     const doc: ReportDoc = {
-      title: 'Term Review',
+      title: 'Store performance',
       widgets: [
-        { type: 'metric', value: 5, label: 'To grade', w: 1 },
-        { type: 'chart', title: 'Activity', chart: { mark: 'bar', x: 'k', y: 'v', series: [{ k: 'A', v: 3 }] } },
+        { type: 'metric', value: 599, label: 'Active customers', w: 1 },
+        { type: 'chart', title: 'Revenue by store', chart: { mark: 'bar', x: 'store', y: 'revenue', series: [{ store: 'Store 1', revenue: 3 }] } },
       ],
     }
     render(<ReportView doc={doc} />)
-    expect(screen.getByText('Term Review')).toBeTruthy()
-    expect(screen.getByText('To grade')).toBeTruthy()
-    expect(screen.getByText('Activity')).toBeTruthy()
+    expect(screen.getByText('Store performance')).toBeTruthy()
+    expect(screen.getByText('Active customers')).toBeTruthy()
+    expect(screen.getByText('Revenue by store')).toBeTruthy()
   })
 
   it('dispatches custom widgets through the registry', () => {

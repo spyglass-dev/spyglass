@@ -24,9 +24,18 @@
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
   },
+  "dependencies": {
+    "react-vega": "^8.0.0",
+    "vega": "^6.2.0",
+    "vega-lite": "^6.4.3"
+  },
   "peerDependencies": {
+    "lucide-react": ">=0.400.0",
     "react": ">=18",
     "react-dom": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "lucide-react": { "optional": true }
   },
   "devDependencies": {
     "@storybook/react-vite": "^10.4.6",
@@ -34,6 +43,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "jsdom": "^29.0.1",
+    "lucide-react": "^0.400.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "storybook": "^10.4.6",

@@ -23,6 +23,27 @@ export interface ReportSummary {
   title: string
 }
 
+/** A runtime filter sent to `/reports/{id}/run` (mirrors the engine's Filter). */
+export interface QueryFilter {
+  member: string
+  operator: 'equals' | 'notEquals' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'notIn' | 'contains' | 'set' | 'notSet'
+  values: (string | number | boolean)[]
+}
+
+/** The saved report template — enough of it to discover which cubes/members a
+ *  report touches (so the filter bar knows what's filterable). */
+export interface BoundReportTemplate {
+  title?: string
+  widgets: {
+    query?: {
+      measures?: string[]
+      dimensions?: string[]
+      timeDimensions?: { dimension: string }[]
+      filters?: { member: string }[]
+    }
+  }[]
+}
+
 export interface MeasureMeta {
   name: string
   member: string
@@ -51,12 +72,15 @@ export interface ModelMeta {
 export const server = {
   meta: () => json<ModelMeta>('/meta'),
   listReports: () => json<ReportSummary[]>('/reports'),
-  getReport: (id: string) => json<unknown>(`/reports/${id}`),
-  runReport: (id: string, scope?: Record<string, unknown>) =>
+  getReport: (id: string) => json<BoundReportTemplate>(`/reports/${id}`),
+  runReport: (id: string, scope?: Record<string, unknown>, filters?: QueryFilter[]) =>
     json<ReportDoc>(`/reports/${id}/run`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(scope ? { scope } : {}),
+      body: JSON.stringify({
+        ...(scope ? { scope } : {}),
+        ...(filters && filters.length ? { filters } : {}),
+      }),
     }),
   query: (body: unknown) =>
     json<{ columns: { key: string; kind: string }[]; rows: Record<string, unknown>[]; sql?: string }>(
