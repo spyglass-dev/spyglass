@@ -3,6 +3,7 @@ target/
 **/dist/
 **/node_modules/
 **/storybook-static/
+**/.turbo/
 *.tsbuildinfo
 
 # Local env + runtime output (see .env.sample).
