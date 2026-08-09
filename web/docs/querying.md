@@ -131,6 +131,31 @@ Resolution is clock-injected: the compiler never reads system time
 the clockless `compile()` refuses relative ranges outright), so the same
 document at the same instant always compiles to the same SQL.
 
+## Comparison windows and gap filling
+
+Two features on the time dimension, sharing one contract — a `dateRange` to
+anchor on, and the time dimension as the query's **only** grouping:
+
+```json
+{ "measures": ["Orders.count"],
+  "timeDimensions": [{ "dimension": "Orders.created_at", "granularity": "day",
+                       "dateRange": "last 30 days",
+                       "compare": "previous_period", "fillGaps": true }] }
+```
+
+- **`compare`** (`previous_period` | `previous_year`) runs the same query
+  over the shifted window and folds its measures in as `__prev_<measure>`
+  columns (kind `prev_measure`) — real deltas for metrics, a ghost series
+  for charts. `previous_period` shifts back by the window's own width;
+  `previous_year` by one calendar year. Series rows align by time-sorted
+  position, so set `fillGaps` on sparse series; a bucket with no
+  counterpart merges as `null` — "no data then" is not "zero then". A
+  granularity-less time dimension is **filter-only** (Cube semantics), which
+  is what lets a metric query carry a window and a comparison.
+- **`fillGaps`** wraps the aggregate in a `generate_series` join over the
+  window's buckets, so an empty bucket appears as `0` instead of vanishing
+  (requires a `granularity`). With `includeTotal`, the total counts buckets.
+
 ## Pagination and totals
 
 `limit`, `offset`, and `includeTotal` page a query server-side:

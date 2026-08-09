@@ -24,6 +24,7 @@
 
 pub mod analyze;
 pub mod compiler;
+pub mod compare;
 pub mod context;
 pub mod dates;
 pub mod engine;
@@ -47,8 +48,8 @@ pub use model::{
     Model,
 };
 pub use query::{
-    Column, DateRange, Filter, FilterOperator, Granularity, Order, Query, QueryMode,
-    QueryResult, ScalarValue, TimeDimension,
+    Column, Compare, DateRange, Filter, FilterOperator, Granularity, Order, Query,
+    QueryMode, QueryResult, ScalarValue, TimeDimension, PREV_PREFIX,
 };
 
 #[cfg(feature = "postgres")]

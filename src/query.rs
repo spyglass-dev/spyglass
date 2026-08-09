@@ -93,8 +93,11 @@ pub struct Filter {
     pub values: Vec<ScalarValue>,
 }
 
-/// A time dimension with optional truncation + range.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A time dimension with optional truncation + range. With a `granularity`
+/// it is projected and grouped as buckets; **without one it is filter-only**
+/// (the `date_range` applies, nothing is projected) — matching Cube's
+/// semantics, and what lets a metric query carry a comparison window.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TimeDimension {
     pub dimension: String,
@@ -107,7 +110,32 @@ pub struct TimeDimension {
     /// the *intent* and the window moves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub date_range: Option<DateRange>,
+    /// Run the same query over a shifted window and return
+    /// `__prev_<measure>` columns alongside — real deltas for metrics, a
+    /// ghost series for charts. Requires a `date_range`; the time dimension
+    /// must be the query's only grouping.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compare: Option<Compare>,
+    /// Fill empty buckets with 0 via a `generate_series` join, so gaps
+    /// appear instead of vanishing. Requires `granularity` + `date_range`;
+    /// the time dimension must be the query's only grouping.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fill_gaps: bool,
 }
+
+/// Which shifted window `compare` runs over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Compare {
+    /// The window immediately before this one, same width.
+    PreviousPeriod,
+    /// The same window one calendar year earlier.
+    PreviousYear,
+}
+
+/// Prefix of the comparison columns (`__prev_Orders.count`), column kind
+/// `prev_measure`.
+pub const PREV_PREFIX: &str = "__prev_";
 
 /// An absolute `[from, to)` pair, or a relative expression the server
 /// resolves at run time.
@@ -130,6 +158,19 @@ pub enum Granularity {
 }
 
 impl Granularity {
+    /// The `generate_series` step for one bucket of this granularity.
+    pub fn series_step(&self) -> &'static str {
+        match self {
+            Granularity::Hour => "1 hour",
+            Granularity::Day => "1 day",
+            Granularity::Week => "1 week",
+            Granularity::Month => "1 month",
+            // Postgres intervals have no 'quarter' unit.
+            Granularity::Quarter => "3 months",
+            Granularity::Year => "1 year",
+        }
+    }
+
     pub fn as_pg(&self) -> &'static str {
         match self {
             Granularity::Hour => "hour",
