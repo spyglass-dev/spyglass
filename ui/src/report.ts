@@ -62,6 +62,15 @@ export interface WidgetFilterBinding {
   dateField?: string | null
 }
 
+/** Who authored a widget and from what ask — part of the doc, not a side
+ *  channel. Surfaced in the Explain panel so "why is this number here" always
+ *  has an answer. */
+export interface Provenance {
+  prompt?: string
+  author: 'human' | 'agent'
+  at: number
+}
+
 /** A data widget bound to a query, plus its visualization + filter behavior. */
 export interface BoundWidget extends WidgetDraft {
   type: 'bound'
@@ -70,6 +79,7 @@ export interface BoundWidget extends WidgetDraft {
   /** Narrow this widget to one student (passed to the runner). */
   studentId?: string
   filters?: WidgetFilterBinding
+  provenance?: Provenance
 }
 
 export type ReportWidget = WidgetSpec | BoundWidget
