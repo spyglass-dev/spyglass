@@ -171,6 +171,43 @@ isn't a dimension, or a measure whose `drill_members` widens the cube's list.
 Every problem is reported at once. Hosts that embed a single parsed file
 should call `Model::validate()` themselves after parsing.
 
+## Calculated measures
+
+A `number` measure's `sql` may interpolate other measures of the same cube
+with `${CUBE.<measure>}` — resolved to the referenced measure's **compiled
+aggregate expression**, recursively:
+
+```yaml
+measures:
+  count: { type: count }
+  published: { type: sum, sql: "case when published_at is not null then 1 else 0 end" }
+  publish_rate:
+    type: number
+    sql: "${CUBE.published} / nullif(${CUBE.count}, 0) * 100"
+    format: percent
+```
+
+Only declared members interpolate (injection-safety by construction), only
+in `number` measures (aggregates cannot nest), and cycles are refused at
+load time. Calculated measures work everywhere a measure does — including
+`HAVING` filters.
+
+## Segments
+
+Named reusable predicates on a cube — one token for an agent instead of a
+filter blob, and a place to put business definitions so they stop being
+re-derived per report:
+
+```yaml
+segments:
+  active: { sql: "${CUBE}.archived_at is null", description: Items not archived. }
+```
+
+Queried as `{ "segments": ["Items.active"] }`; each compiles parenthesized
+into `WHERE`. A segment's cube participates like any referenced cube —
+joins are planned and its tenant scope is enforced. The catalog exposes
+segment names + descriptions, never the SQL.
+
 ## The tenant rule
 
 Every cube that holds tenant data **must** expose a dimension marked

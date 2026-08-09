@@ -40,6 +40,11 @@ pub struct Query {
     /// evaluated in. Defaults to UTC.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
+    /// Named cube predicates to apply (`"Cube.segment"`). Each compiles into
+    /// the WHERE clause; a segment's cube participates in the query like any
+    /// referenced cube (joins and tenant scope included).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub segments: Vec<String>,
 }
 
 /// How a query reads the cube: aggregated (the default) or row-level.
