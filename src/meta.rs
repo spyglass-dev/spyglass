@@ -29,6 +29,20 @@ pub struct CubeMeta {
     /// The cube's row-mode allowlist (and PII boundary). Empty = no row mode.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub drill_members: Vec<String>,
+    /// Named predicates the cube declares — name + description, never SQL.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub segments: Vec<SegmentMeta>,
+}
+
+/// A segment in the public catalog: what it's called and what it means —
+/// never the predicate SQL.
+#[derive(Debug, Clone, Serialize)]
+pub struct SegmentMeta {
+    pub name: String,
+    /// Fully-qualified (`Cube.segment`) — what a query references.
+    pub member: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// A join edge in the public catalog: where it goes and whether a query may
@@ -145,6 +159,15 @@ impl Model {
                         relationship: j.relationship,
                     })
                     .collect();
+                let segments = cube
+                    .segments
+                    .iter()
+                    .map(|(name, s)| SegmentMeta {
+                        name: name.clone(),
+                        member: format!("{}.{}", cube.name, name),
+                        description: s.description.clone(),
+                    })
+                    .collect();
                 CubeMeta {
                     name: cube.name.clone(),
                     title: cube.title.clone(),
@@ -153,6 +176,7 @@ impl Model {
                     dimensions,
                     joins,
                     drill_members: cube.drill_members.clone(),
+                    segments,
                 }
             })
             .collect();

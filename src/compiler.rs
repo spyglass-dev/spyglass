@@ -68,6 +68,8 @@ pub enum CompileError {
     BadFillGaps(String),
     #[error("compare: {0}")]
     BadCompare(String),
+    #[error("calculated-measure cycle through '{0}' — load-time validation should have caught this")]
+    CalculatedCycle(String),
 }
 
 /// A compiled, parameterized statement ready for an engine to execute.
@@ -139,6 +141,11 @@ fn referenced_cubes(model: &Model, query: &Query) -> Result<Vec<String>, Compile
     }
     for f in &query.filters {
         push(&f.member)?;
+    }
+    // A segment's cube participates like any referenced cube — its joins are
+    // planned and, crucially, its tenant scope is enforced.
+    for s in &query.segments {
+        push(s)?;
     }
     // A selected dimension's label pulls the label's cube into the query even
     // when nothing else references it — that is the point of labels.
@@ -296,14 +303,31 @@ fn dimension_expr(
 }
 
 fn measure_expr(cube: &Cube, field: &str, has_joins: bool) -> Result<String, CompileError> {
+    measure_expr_guarded(cube, field, has_joins, &mut Vec::new())
+}
+
+fn measure_expr_guarded(
+    cube: &Cube,
+    field: &str,
+    has_joins: bool,
+    stack: &mut Vec<String>,
+) -> Result<String, CompileError> {
     let m = cube
         .measures
         .get(field)
         .ok_or_else(|| CompileError::UnknownMember(format!("{}.{}", cube.name, field)))?;
-    let sql = m
-        .sql
-        .as_ref()
-        .map(|s| qualify_expr(s, cube, has_joins));
+    // A `number` measure's SQL may interpolate `${CUBE.measure}` — resolved
+    // to the referenced measure's COMPILED aggregate expression, recursively.
+    // This is what makes ratios like `${CUBE.published} / nullif(${CUBE.count}, 0)`
+    // declarable. Only declared members interpolate, so injection-safety is
+    // preserved by construction; cycles are refused (validated at load too).
+    let sql = match (&m.sql, m.measure_type) {
+        (Some(sql), MeasureType::Number) => {
+            Some(interpolate_measures(cube, field, sql, has_joins, stack)?)
+        }
+        (Some(sql), _) => Some(qualify_expr(sql, cube, has_joins)),
+        (None, _) => None,
+    };
     Ok(match m.measure_type {
         MeasureType::Count => "count(*)".to_string(),
         MeasureType::CountDistinct => format!(
@@ -317,6 +341,52 @@ fn measure_expr(cube: &Cube, field: &str, has_joins: bool) -> Result<String, Com
         MeasureType::Max => format!("max({})::float8", req_sql(sql, field)?),
         MeasureType::Number => format!("({})::float8", req_sql(sql, field)?),
     })
+}
+
+/// Replace `${CUBE.m}` / `${<OwnCube>.m}` tokens with the referenced
+/// measure's compiled expression. `${CUBE}` (no member) stays for
+/// `qualify_expr` to turn into the alias; any other token is refused.
+fn interpolate_measures(
+    cube: &Cube,
+    field: &str,
+    sql: &str,
+    has_joins: bool,
+    stack: &mut Vec<String>,
+) -> Result<String, CompileError> {
+    if stack.iter().any(|f| f == field) {
+        return Err(CompileError::CalculatedCycle(format!("{}.{}", cube.name, field)));
+    }
+    stack.push(field.to_string());
+    let mut out = String::new();
+    let mut rest = sql;
+    while let Some(start) = rest.find("${") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let Some(len) = after.find('}') else {
+            out.push_str(&rest[start..]);
+            rest = "";
+            break;
+        };
+        let token = &after[..len];
+        match token.split_once('.') {
+            Some((target, member)) if target == "CUBE" || target == cube.name => {
+                out.push_str(&measure_expr_guarded(cube, member, has_joins, stack)?);
+            }
+            None if token == "CUBE" => out.push_str("${CUBE}"),
+            _ => {
+                stack.pop();
+                return Err(CompileError::UnknownMember(format!(
+                    "${{{token}}} in {}.{field} — only ${{CUBE.<measure>}} of the same cube \
+                     may be interpolated",
+                    cube.name
+                )));
+            }
+        }
+        rest = &after[len + 1..];
+    }
+    out.push_str(rest);
+    stack.pop();
+    Ok(qualify_expr(&out, cube, has_joins))
 }
 
 fn req_sql(sql: Option<String>, field: &str) -> Result<String, CompileError> {
@@ -561,6 +631,18 @@ pub fn compile_at(
             continue;
         }
         where_parts.push(compile_filter(cube, has_joins, f, &mut params)?);
+    }
+    // Segments: named model-declared predicates, parenthesized into WHERE.
+    // The segment's cube is already a participant (referenced_cubes), so its
+    // joins and tenant scope apply like anything else.
+    for seg in &query.segments {
+        let (_, seg_name) = split_member(seg)?;
+        let cube = plan.cube_for(seg)?;
+        let segment = cube
+            .segments
+            .get(seg_name)
+            .ok_or_else(|| CompileError::UnknownMember(seg.clone()))?;
+        where_parts.push(format!("({})", join_condition(&segment.sql, cube, model)));
     }
     let tz = crate::dates::parse_tz(query.timezone.as_deref()).map_err(CompileError::BadTimezone)?;
     let mut fill: Option<FillSpec> = None;

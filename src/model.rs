@@ -83,6 +83,63 @@ impl Model {
                         }
                     }
                 }
+                let refs = measure
+                    .sql
+                    .as_deref()
+                    .map(|sql| calculated_refs(cube, sql))
+                    .unwrap_or_default();
+                if !refs.is_empty() && measure.measure_type != MeasureType::Number {
+                    problems.push(format!(
+                        "{name}.{measure_name}: ${{Cube.measure}} interpolation is only \
+                         supported in `number` measures (aggregates cannot nest)"
+                    ));
+                }
+                for r in refs {
+                    if !cube.measures.contains_key(r) {
+                        problems.push(format!(
+                            "{name}.{measure_name}: interpolated member '{r}' is not a measure \
+                             of this cube"
+                        ));
+                    }
+                }
+            }
+            // Calculated-measure cycles: DFS over the ${CUBE.m} reference
+            // graph. A cycle would recurse forever at compile time; catching
+            // it here means a bad model never loads.
+            for start in cube.measures.keys() {
+                let mut stack = vec![start.as_str()];
+                let mut path: Vec<&str> = Vec::new();
+                fn dfs<'a>(
+                    cube: &'a Cube,
+                    current: &'a str,
+                    path: &mut Vec<&'a str>,
+                    problems: &mut Vec<String>,
+                    cube_name: &str,
+                ) {
+                    if path.contains(&current) {
+                        problems.push(format!(
+                            "{cube_name}: calculated-measure cycle through '{current}' ({})",
+                            path.join(" -> ")
+                        ));
+                        return;
+                    }
+                    path.push(current);
+                    if let Some(m) = cube.measures.get(current) {
+                        if let Some(sql) = &m.sql {
+                            for r in calculated_refs(cube, sql) {
+                                dfs(cube, r, path, problems, cube_name);
+                            }
+                        }
+                    }
+                    path.pop();
+                }
+                let before = problems.len();
+                dfs(cube, stack.pop().expect("start"), &mut path, &mut problems, name);
+                // One report per cycle is enough; skip the remaining starts
+                // once a cycle in this cube is found.
+                if problems.len() > before {
+                    break;
+                }
             }
         }
         if problems.is_empty() { Ok(()) } else { Err(problems) }
@@ -124,6 +181,22 @@ pub struct Cube {
     /// published here. Empty = row mode unavailable for this cube.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub drill_members: Vec<String>,
+    /// Named reusable predicates (`segments: { paying: { sql: "${CUBE}.plan
+    /// <> 'free'" } }`), queried as `"segments": ["Cube.paying"]`. One token
+    /// for an agent instead of a filter blob, and a place to put business
+    /// definitions so they stop being re-derived per report.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub segments: BTreeMap<String, Segment>,
+}
+
+/// A named predicate on a cube's rows. `${CUBE}` (or any `${CubeName}`)
+/// resolves to the cube's alias in the compiled SQL.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Segment {
+    pub sql: String,
+    /// One sentence of business definition, shown in the catalog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// How a join edge relates the declaring cube's rows to the target's.
@@ -280,4 +353,29 @@ pub struct DrillTarget {
 
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+/// The `${…}` token contents of a SQL fragment, in order.
+pub(crate) fn sql_refs(sql: &str) -> Vec<&str> {
+    let mut refs = Vec::new();
+    let mut rest = sql;
+    while let Some(start) = rest.find("${") {
+        let Some(len) = rest[start + 2..].find('}') else { break };
+        refs.push(&rest[start + 2..start + 2 + len]);
+        rest = &rest[start + 2 + len + 1..];
+    }
+    refs
+}
+
+/// The measures a calculated (`number`) measure's SQL references on its own
+/// cube — `${CUBE.m}` or `${<CubeName>.m}` tokens. `${CUBE}` alone (the
+/// alias) is not a measure reference.
+pub(crate) fn calculated_refs<'a>(cube: &Cube, sql: &'a str) -> Vec<&'a str> {
+    sql_refs(sql)
+        .into_iter()
+        .filter_map(|token| {
+            let (target, member) = token.split_once('.')?;
+            (target == "CUBE" || target == cube.name).then_some(member)
+        })
+        .collect()
 }
