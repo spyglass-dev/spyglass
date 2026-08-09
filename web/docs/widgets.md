@@ -175,6 +175,26 @@ ignores the report's date range *looks* identical to one that honors it.
 so a widget frame can render an explicit "all time" marker for any widget the
 range could not reach, instead of presenting mixed windows as one report.
 
+### The "all time" marker
+
+Both frames (`ReportView` and `ReportCanvas`) render the receipt: any widget
+whose resolved spec carries `applied.dateRangeSkipped` gets an **`AllTimeChip`**
+in its title row (title-less metrics get a marker row of their own). The chip
+reads **"All time"** for `no_time_field` / `opted_out` / `unknown_cube` and
+**"Pinned range"** for `widget_pinned`, with the precise reason in the tooltip
+and a `data-reason` attribute for tests. Styling comes from three tokens:
+`--rpt-warn-text`, `--rpt-warn-bg`, `--rpt-warn-border`.
+
+Two practices keep the marker meaningful:
+
+- A widget that is *deliberately* all-time (a lifetime total beside ranged
+  widgets) should say so — `filters: { ignore: true }` — so its chip reflects a
+  choice rather than a hole in the model.
+- Hosts should regression-test their shipped templates: rendered with an
+  active date range, they should produce **zero involuntary chips**
+  (`no_time_field` / `unknown_cube`). That test is what stops the
+  missing-time-field bug from recurring the next time someone adds a cube.
+
 ## Bound views: live product widgets, not an escape hatch
 
 A `custom` widget carries frozen data. A **view** is a host React component
