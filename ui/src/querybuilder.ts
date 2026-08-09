@@ -8,12 +8,40 @@ import type { WidgetSpec, ValueFormat, ChartMark } from './types'
 
 // ── Catalog (mirrors the engine's /meta) ────────────────────────────────────
 
+export interface MeasureMeta {
+  name: string
+  member: string
+  type?: string
+  title?: string
+  format?: string
+  description?: string
+  featured?: boolean
+  unit?: string
+  filterable?: boolean
+  drill_members?: string[]
+}
+export interface DimensionMeta {
+  name: string
+  member: string
+  type?: string
+  title?: string
+  tenant?: boolean
+  label?: string
+  drill_entity?: string
+  description?: string
+  featured?: boolean
+  unit?: string
+  filterable?: boolean
+}
 export interface CubeMeta {
   name: string
   title?: string
   description?: string
-  measures: { name: string; member: string; type?: string; title?: string; format?: string }[]
-  dimensions: { name: string; member: string; type?: string; title?: string; tenant?: boolean }[]
+  measures: MeasureMeta[]
+  dimensions: DimensionMeta[]
+  joins?: { target: string; relationship: string }[]
+  drill_members?: string[]
+  segments?: { name: string; member: string; description?: string }[]
 }
 export interface CubeModelMeta {
   cubes: CubeMeta[]
@@ -65,6 +93,9 @@ export interface QueryResultLite {
   has_more?: boolean
   /** Set when the engine's row cap clamped the result. */
   truncated_at?: number
+  /** The compiled SQL — the engine has always returned it; the Explain panel
+   *  finally shows it. */
+  sql?: string
 }
 
 /** Merge a DataGrid sort/paging delta into a widget's query — the "sort and
@@ -160,6 +191,23 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
 /** A blank draft for a cube (nothing selected yet). */
 export function emptyDraft(): WidgetDraft {
   return { as: 'metric', query: { measures: [], dimensions: [], filters: [] } }
+}
+
+/**
+ * Auto-select a visualization for a query's shape (Explore's viz switcher
+ * default — manual override always available): 1 measure + nothing → metric;
+ * a granular time dimension → line; 1 dimension → bar; 2 dimensions → pivot;
+ * anything else → table.
+ */
+export function autoViz(query: WidgetQuery): { as: WidgetDraft['as']; mark?: ChartMark } {
+  const measures = query.measures?.length ?? 0
+  const dims = query.dimensions?.length ?? 0
+  const timed = (query.timeDimensions ?? []).some((t) => t.granularity)
+  if (measures >= 1 && dims === 0 && timed) return { as: 'chart', mark: 'line' }
+  if (measures === 1 && dims === 0) return { as: 'metric' }
+  if (measures >= 1 && dims === 1 && !timed) return { as: 'chart', mark: 'bar' }
+  if (measures >= 1 && dims === 2) return { as: 'pivot' }
+  return { as: 'table' }
 }
 
 /** The cube a draft targets, from its first selected member (or undefined). */

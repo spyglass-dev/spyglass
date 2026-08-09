@@ -13,12 +13,12 @@ export const MOCK_META: CubeModelMeta = {
       title: 'Payments',
       measures: [
         { name: 'count', member: 'Payments.count', title: 'Payments' },
-        { name: 'revenue', member: 'Payments.revenue', title: 'Revenue', format: 'currency' },
-        { name: 'avg', member: 'Payments.avg', title: 'Average payment', format: 'currency' },
+        { name: 'revenue', member: 'Payments.revenue', title: 'Revenue', format: 'currency', featured: true, unit: '$', description: 'Total amount paid.' },
+        { name: 'avg', member: 'Payments.avg', title: 'Average payment', format: 'currency', unit: '$' },
       ],
       dimensions: [
-        { name: 'store', member: 'Payments.store', type: 'string' },
-        { name: 'rating', member: 'Payments.rating', type: 'string' },
+        { name: 'store', member: 'Payments.store', type: 'string', featured: true },
+        { name: 'rating', member: 'Payments.rating', type: 'string', description: 'MPAA film rating.' },
         { name: 'created_at', member: 'Payments.created_at', type: 'time' },
       ],
     },
@@ -98,7 +98,18 @@ export function mockRunQuery(delayMs = 350) {
           measures.forEach((m) => (row[m] = fakeValue(m, i + 1)))
           return row
         })
-        resolve({ columns, rows })
+        // A plausible compiled statement, so the Explain panel has something
+        // to show (the real engine returns QueryResult.sql).
+        const cube = (measures[0] ?? dimension ?? 'Payments.count').split('.')[0]
+        const sql = [
+          `select ${[dimension, ...measures].filter(Boolean).map((m) => `${String(m).split('.')[1]}`).join(', ')}`,
+          `from ${cube.toLowerCase()} as "${cube}"`,
+          ...(query.filters?.length
+            ? [`where ${query.filters.map((f, i) => `${f.member.split('.')[1]} ${f.operator} $${i + 1}`).join(' and ')}`]
+            : []),
+          ...(dimension ? [`group by ${dimension.split('.')[1]}`] : []),
+        ].join('\n')
+        resolve({ columns, rows, sql })
       }, delayMs)
     })
 }

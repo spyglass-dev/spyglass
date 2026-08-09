@@ -174,6 +174,42 @@ ignores the report's date range *looks* identical to one that honors it.
 so a widget frame can render an explicit "all time" marker for any widget the
 range could not reach, instead of presenting mixed windows as one report.
 
+## Explore: text and chips edit one object
+
+`Explore` is the workbench: an **ask bar**, a searchable **catalog rail**
+(featured members first, descriptions and units from `/meta`), the query as a
+**chip sentence** (`revenue ▸ by rating ▸ where store equals Store 1 ▸ top 25`),
+an **auto-selected visualization** (1 measure → metric; granular time → line;
+1 dimension → bar; 2 dimensions → pivot; else table — manual override always
+available), and the **Explain panel** — the compiled SQL the engine has always
+returned and no UI ever displayed, plus row count and timing.
+
+The property that makes it work: **the ask bar and the chips edit ONE
+`WidgetDraft`.** The host's `onAsk(prompt, current)` returns a draft; the
+chips then edit that same object. Text is an editor of the document, never a
+second authoring path.
+
+Invalid queries never run: `validateQuery(query, meta)` returns
+`{ ok: false, error, suggestions }` (closest member names), shown inline —
+and used by agents to self-repair.
+
+## The text layer: digest, explore_data, provenance
+
+- **`modelDigest(meta)`** generates the agent-readable model description from
+  `/meta` — featured members lead; descriptions, units, labels, drill
+  entities, segments, joins and `drill_members` all ride along. Generated,
+  never hand-written, so it cannot drift from the deployed cubes.
+- **`explore_data`** (via `buildReportTools(host, { meta, runQuery })`) runs a
+  query and returns a **compact summary** — columns, row count, total, first
+  10 rows, compiled SQL — so an agent *looks before it builds*. A bad member
+  returns `{ ok: false, error, suggestions }` for self-repair instead of a
+  broken widget.
+- **Provenance**: agent-built bound widgets carry
+  `{ prompt, author: 'agent', at }` — part of the doc, not a side channel, so
+  "why is this number here" always has an answer. `create_report` /
+  `add_report_widget` accept a `prompt` parameter and validate bound queries
+  against the model before rendering anything.
+
 ## Building reports with distri
 
 The bundled [`reporting`](https://github.com/spyglass-dev/spyglass/blob/main/skills/reporting.md)
