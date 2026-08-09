@@ -41,6 +41,31 @@ numbers up top, then `chart` / `table` widgets, with `note`s for narrative.
 }
 ```
 
+## Report filters: `applyFilters` returns a receipt
+
+Report-wide filters (a date range + facet selections) are merged into each
+bound widget's query by `applyFilters(widget, filters, cubeCaps)`. It returns
+`{ query, applied }` — the merged query **and** which filters actually reached
+it:
+
+```ts
+interface AppliedFilters {
+  facets: string[]          // facet keys pushed into the query as IN filters
+  dateRange?: string        // member the date range landed on, e.g. "Orders.created_at"
+  dateRangeSkipped?:        // set when an ACTIVE range did NOT reach this widget:
+    | 'no_time_field'       //   the cube declares no time field
+    | 'opted_out'           //   the widget opted out (filters.ignore / dateField: null)
+    | 'widget_pinned'       //   the query already pins its own filter on that member
+    | 'unknown_cube'        //   the host declared no capabilities for the cube
+}
+```
+
+The receipt exists because the worst filter bug is a silent one: a widget that
+ignores the report's date range *looks* identical to one that honors it.
+`resolveReport`/`resolveBound` attach `applied` to every resolved widget spec,
+so a widget frame can render an explicit "all time" marker for any widget the
+range could not reach, instead of presenting mixed windows as one report.
+
 ## Building reports with distri
 
 The bundled [`reporting`](https://github.com/spyglass-dev/spyglass/blob/main/skills/reporting.md)

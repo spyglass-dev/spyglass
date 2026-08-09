@@ -7,7 +7,14 @@
  * Host-agnostic: the host supplies the query runner and its cube capabilities
  * (which dimensions/time field each cube has). Everything else is generic.
  */
-import type { WidgetSpec, WidgetWidth, ValueFormat, ChartMark, ReportDoc } from './types'
+import type {
+  WidgetSpec,
+  WidgetWidth,
+  ValueFormat,
+  ChartMark,
+  ReportDoc,
+  AppliedFilters,
+} from './types'
 import {
   draftToWidgetSpec,
   type WidgetDraft,
@@ -100,23 +107,42 @@ function queryCube(q: WidgetQuery): string | undefined {
 const hasFilterOn = (q: WidgetQuery, member: string) => (q.filters ?? []).some((f) => f.member === member)
 const groupsBy = (q: WidgetQuery, member: string) => (q.dimensions ?? []).includes(member)
 
+/** `applyFilters`' result: the merged query plus the receipt of what reached it. */
+export interface FilteredQuery {
+  query: WidgetQuery
+  applied: AppliedFilters
+}
+
 /**
  * Merge report filters into a widget's query. A facet only applies where the
  * cube has that dimension AND the widget doesn't group by it (never filter the
  * dimension you're breaking down by). A date range is a WHERE filter (gte/lt)
  * on the cube's time field — never a group-by. Per-widget bindings win.
+ *
+ * Returns the query **and** which filters actually reached it (`applied`) —
+ * in particular, an active date range that could NOT be applied is reported
+ * via `applied.dateRangeSkipped` instead of being dropped silently. When
+ * nothing applies, `query` is the widget's own object (identity-preserved).
  */
 export function applyFilters(
   widget: BoundWidget,
   filters: ReportFilters | undefined,
   caps: CubeCapsMap,
-): WidgetQuery {
+): FilteredQuery {
   const query = widget.query
-  if (!filters || widget.filters?.ignore || !hasActiveFilters(filters)) return query
+  const applied: AppliedFilters = { facets: [] }
+  if (!filters || !hasActiveFilters(filters)) return { query, applied }
+
+  const rangeActive = resolveDateRange(filters) !== null
+  const skipped = (reason: AppliedFilters['dateRangeSkipped']): FilteredQuery => ({
+    query,
+    applied: rangeActive ? { ...applied, dateRangeSkipped: reason } : applied,
+  })
+  if (widget.filters?.ignore) return skipped('opted_out')
   const cube = queryCube(query)
-  if (!cube) return query
+  if (!cube) return skipped('unknown_cube')
   const cap = caps[cube]
-  if (!cap) return query
+  if (!cap) return skipped('unknown_cube')
 
   const nextFilters: QueryFilter[] = [...(query.filters ?? [])]
   for (const [key, values] of Object.entries(filters.facets ?? {})) {
@@ -124,18 +150,26 @@ export function applyFilters(
     const member = `${cube}.${key}`
     if (groupsBy(query, member) || hasFilterOn(query, member)) continue
     nextFilters.push({ member, operator: 'in', values })
+    applied.facets.push(key)
   }
 
   const range = resolveDateRange(filters)
   const dateField = widget.filters?.dateField === undefined ? cap.timeField : widget.filters.dateField
-  if (range && dateField) {
-    const member = `${cube}.${dateField}`
-    if (!hasFilterOn(query, member)) {
-      nextFilters.push({ member, operator: 'gte', values: [range[0]] })
-      nextFilters.push({ member, operator: 'lt', values: [range[1]] })
+  if (range) {
+    if (!dateField) {
+      applied.dateRangeSkipped = widget.filters?.dateField === null ? 'opted_out' : 'no_time_field'
+    } else {
+      const member = `${cube}.${dateField}`
+      if (hasFilterOn(query, member)) {
+        applied.dateRangeSkipped = 'widget_pinned'
+      } else {
+        nextFilters.push({ member, operator: 'gte', values: [range[0]] })
+        nextFilters.push({ member, operator: 'lt', values: [range[1]] })
+        applied.dateRange = member
+      }
     }
   }
-  return { ...query, filters: nextFilters }
+  return { query: { ...query, filters: nextFilters }, applied }
 }
 
 // ── Resolve ──────────────────────────────────────────────────────────────────
@@ -152,14 +186,16 @@ export interface ResolveOptions {
 
 const isBound = (w: ReportWidget): w is BoundWidget => (w as BoundWidget).type === 'bound'
 
-/** Resolve one bound widget into a data-bearing spec (honoring filters). */
+/** Resolve one bound widget into a data-bearing spec (honoring filters). The
+ *  spec carries `applied` — which report filters reached the query — so a
+ *  widget frame can mark scope the filters could not reach. */
 export async function resolveBound(
   widget: BoundWidget,
   opts: ResolveOptions,
 ): Promise<WidgetSpec> {
-  const query = applyFilters(widget, opts.filters, opts.cubeCaps ?? {})
+  const { query, applied } = applyFilters(widget, opts.filters, opts.cubeCaps ?? {})
   const result = await opts.runQuery(query, { studentId: widget.studentId })
-  const spec = draftToWidgetSpec(widget, result)
+  const spec: WidgetSpec = { ...draftToWidgetSpec(widget, result), applied }
   return widget.w ? { ...spec, w: widget.w } : spec
 }
 
