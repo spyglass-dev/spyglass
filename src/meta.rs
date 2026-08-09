@@ -54,6 +54,14 @@ pub struct MeasureMeta {
     /// Measure-level narrowing of the cube's `drill_members`, if declared.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drill_members: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub featured: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub filterable: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -74,11 +82,21 @@ pub struct DimensionMeta {
     /// UI's `DrillEvent.entity`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drill_entity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub featured: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub filterable: bool,
 }
 
 impl Model {
     /// Project the model into its UI-facing catalog (no SQL leaks). Cubes,
     /// measures, and dimensions come out in deterministic (sorted) order.
+    /// `hidden` members are omitted entirely — hidden curates discovery
+    /// (the member stays queryable by name); it is not a security boundary.
     pub fn metadata(&self) -> ModelMeta {
         let cubes = self
             .cubes
@@ -87,6 +105,7 @@ impl Model {
                 let measures = cube
                     .measures
                     .iter()
+                    .filter(|(_, m)| !m.hidden)
                     .map(|(name, m)| MeasureMeta {
                         name: name.clone(),
                         member: format!("{}.{}", cube.name, name),
@@ -94,11 +113,16 @@ impl Model {
                         title: m.title.clone(),
                         format: m.format.clone(),
                         drill_members: m.drill_members.clone(),
+                        description: m.description.clone(),
+                        featured: m.featured,
+                        unit: m.unit.clone(),
+                        filterable: m.filterable,
                     })
                     .collect();
                 let dimensions = cube
                     .dimensions
                     .iter()
+                    .filter(|(_, d)| !d.hidden)
                     .map(|(name, d)| DimensionMeta {
                         name: name.clone(),
                         member: format!("{}.{}", cube.name, name),
@@ -107,6 +131,10 @@ impl Model {
                         tenant: d.tenant,
                         label: d.label.clone(),
                         drill_entity: d.drill.as_ref().map(|t| t.entity.clone()),
+                        description: d.description.clone(),
+                        featured: d.featured,
+                        unit: d.unit.clone(),
+                        filterable: d.filterable,
                     })
                     .collect();
                 let joins = cube

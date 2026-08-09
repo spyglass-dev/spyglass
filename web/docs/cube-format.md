@@ -148,6 +148,29 @@ measures:
 
 Add `format: percent` on ratio measures so the UI renders them correctly.
 
+## Curation
+
+Five fields on both measures and dimensions tune what the catalog (`/meta`)
+shows — curation is the difference between a catalog a human can browse and a
+list of forty equal strings, and it is the only ranking signal an agent has:
+
+| Field | Meaning |
+|-------|---------|
+| `description` | one sentence of definition, shown on hover and read by agents. "Average score" is exactly the kind of number that needs one |
+| `featured: true` | surface this member first in catalogs and digests |
+| `hidden: true` | omit from `/meta` entirely. The member stays **queryable by name** — hidden curates discovery, it is not security |
+| `unit` | display unit (`orders`, `students`, `%`) |
+| `filterable: true` | offer this dimension in filter UIs (and the distinct-values endpoint, once it exists) |
+
+## Load-time validation
+
+`load_dir` validates the **merged** model and refuses to load one with
+dangling cross-references: a `joins:` target that isn't a cube, a `label:`
+that doesn't resolve to a declared dimension, a `drill_members` entry that
+isn't a dimension, or a measure whose `drill_members` widens the cube's list.
+Every problem is reported at once. Hosts that embed a single parsed file
+should call `Model::validate()` themselves after parsing.
+
 ## The tenant rule
 
 Every cube that holds tenant data **must** expose a dimension marked

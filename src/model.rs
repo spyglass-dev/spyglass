@@ -31,6 +31,62 @@ impl Model {
             self.cubes.insert(k, v);
         }
     }
+
+    /// Check cross-references the type system can't: join targets exist,
+    /// label targets resolve to a declared dimension, `drill_members` name
+    /// declared dimensions, and a measure's `drill_members` never widens the
+    /// cube's. Call after the FULL model is assembled (references may span
+    /// files) — `load_dir` does; hosts embedding a single parsed file should
+    /// call it themselves. Returns every problem, not just the first.
+    pub fn validate(&self) -> Result<(), Vec<String>> {
+        let mut problems: Vec<String> = Vec::new();
+        // A drill member may be a local dimension key or a qualified member.
+        let resolves = |cube: &Cube, member: &str| -> bool {
+            match member.split_once('.') {
+                Some((c, field)) => self
+                    .cube(c)
+                    .is_some_and(|cb| cb.dimensions.contains_key(field)),
+                None => cube.dimensions.contains_key(member),
+            }
+        };
+        for (name, cube) in &self.cubes {
+            for target in cube.joins.keys() {
+                if self.cube(target).is_none() {
+                    problems.push(format!("{name}: join target '{target}' is not a cube"));
+                }
+            }
+            for (dim_name, dim) in &cube.dimensions {
+                if let Some(label) = &dim.label {
+                    if !resolves(cube, label) {
+                        problems.push(format!(
+                            "{name}.{dim_name}: label '{label}' does not resolve to a declared dimension"
+                        ));
+                    }
+                }
+            }
+            for member in &cube.drill_members {
+                if !resolves(cube, member) {
+                    problems.push(format!(
+                        "{name}: drill member '{member}' does not resolve to a declared dimension"
+                    ));
+                }
+            }
+            for (measure_name, measure) in &cube.measures {
+                if let Some(members) = &measure.drill_members {
+                    for member in members {
+                        if !cube.drill_members.contains(member) {
+                            problems.push(format!(
+                                "{name}.{measure_name}: drill member '{member}' is not in the \
+                                 cube's drill_members — a measure may narrow the cube's list, \
+                                 never widen it"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        if problems.is_empty() { Ok(()) } else { Err(problems) }
+    }
 }
 
 /// One cube — a queryable entity backed by a base relation.
@@ -137,6 +193,24 @@ pub struct Measure {
     /// published record shape, it never widens it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drill_members: Option<Vec<String>>,
+    /// One sentence of definition, shown in the catalog and read by agents.
+    /// "Average score" is exactly the kind of number that needs one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Surface this member first in catalogs and digests.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub featured: bool,
+    /// Omit this member from the public catalog (`/meta`). It stays
+    /// queryable by name — hidden curates discovery, it is not security.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
+    /// Unit label for display (e.g. `students`, `points`, `%`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    /// Whether filter UIs should offer this member (for measures this only
+    /// becomes meaningful once measure filters compile to HAVING).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub filterable: bool,
 }
 
 /// Dimension value type.
@@ -178,6 +252,24 @@ pub struct Dimension {
     /// router is drill-down-in-place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drill: Option<DrillTarget>,
+    /// One sentence of definition, shown in the catalog and read by agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Surface this member first in catalogs and digests.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub featured: bool,
+    /// Omit this member from the public catalog (`/meta`). It stays
+    /// queryable by name — hidden curates discovery, it is not security.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
+    /// Unit label for display (rarely useful on dimensions; kept for
+    /// symmetry with measures).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    /// Whether filter UIs (and the `/values` distinct-value endpoint, once it
+    /// exists) should offer this dimension. The allowlist for facets.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub filterable: bool,
 }
 
 /// A dimension's drill annotation: the entity a click resolves to.

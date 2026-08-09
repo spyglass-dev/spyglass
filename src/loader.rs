@@ -22,6 +22,8 @@ pub enum LoadError {
         #[source]
         source: serde_yaml::Error,
     },
+    #[error("invalid model in {dir}:\n  {}", problems.join("\n  "))]
+    Invalid { dir: String, problems: Vec<String> },
 }
 
 /// Parse one definition file's contents into a [`Model`] (accepts a full model
@@ -133,5 +135,10 @@ pub fn load_dir(dir: impl AsRef<Path>) -> Result<Model, LoadError> {
         let m = parse_str(&contents, &path.display().to_string())?;
         model.merge(m);
     }
+    // Cross-reference validation runs on the MERGED model — a join or label
+    // may legitimately point at a cube defined in another file.
+    model
+        .validate()
+        .map_err(|problems| LoadError::Invalid { dir: dir.display().to_string(), problems })?;
     Ok(model)
 }
