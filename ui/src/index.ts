@@ -9,6 +9,8 @@ export * from './types'
 export * from './registry'
 export * from './filters'
 export * from './querybuilder'
+export * from './drill'
+export * from './urlstate'
 export * from './report'
 export * from './report.schema'
 export * from './distri'
@@ -27,6 +29,7 @@ export {
   type GridQueryDelta,
 } from './components/DataGrid'
 export { tokens, type Tokens } from './tokens'
+export { DrillBreadcrumb } from './components/DrillBreadcrumb'
 export { Chart } from './components/Chart'
 export { Note } from './components/Note'
 export {

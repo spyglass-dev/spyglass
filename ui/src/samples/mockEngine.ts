@@ -56,18 +56,42 @@ function fakeValue(member: string, seed: number): number {
   return Math.round(base * (0.4 + ((seed * 37) % 100) / 100))
 }
 
-/** A mock query runner — resolves after a short delay with plausible rows. */
+/** A mock query runner — resolves after a short delay with plausible rows.
+ *  Honors `equals` filters (drill-down) and `mode: 'rows'` (records drawer),
+ *  so the drill stories behave like a real engine. */
 export function mockRunQuery(delayMs = 350) {
   return (query: WidgetQuery): Promise<QueryResultLite> =>
     new Promise((resolve) => {
       setTimeout(() => {
+        if (query.mode === 'rows') {
+          // Record-level rows, as the engine's drill_members projection.
+          const keys = ['Rentals.rental_id', 'Rentals.customer_name', 'Rentals.rented_at', 'Rentals.amount']
+          const names = ['Karl Seal', 'Eleanor Hunt', 'Clara Shaw', 'Marion Snyder', 'Rhonda Kennedy', 'Tommy Collazo']
+          const rows = Array.from({ length: 6 }, (_, i) => ({
+            'Rentals.rental_id': `r-${1041 + i * 7}`,
+            'Rentals.customer_name': names[i],
+            'Rentals.rented_at': `2022-06-${String(3 + i * 4).padStart(2, '0')}`,
+            'Rentals.amount': (fakeValue('avg', i + 2) % 9) + 0.99,
+          }))
+          resolve({ columns: keys.map((key) => ({ key, kind: 'dimension' })), rows })
+          return
+        }
         const measures = query.measures ?? []
         const dimension = query.dimensions?.[0]
         const columns = [
           ...(dimension ? [{ key: dimension, kind: 'dimension' }] : []),
           ...measures.map((m) => ({ key: m, kind: 'measure' })),
         ]
-        const cats = dimension ? DIM_VALUES[dimension] ?? ['A', 'B', 'C'] : [undefined]
+        // Drill-down filters narrow the grouped dimension's categories.
+        const equalsOn = (member: string) =>
+          (query.filters ?? [])
+            .filter((f) => f.member === member && f.operator === 'equals')
+            .flatMap((f) => f.values ?? [])
+        let cats: (string | undefined)[] = dimension ? DIM_VALUES[dimension] ?? ['A', 'B', 'C'] : [undefined]
+        if (dimension) {
+          const wanted = equalsOn(dimension)
+          if (wanted.length) cats = cats.filter((c) => wanted.includes(c as string))
+        }
         const rows = cats.map((cat, i) => {
           const row: Record<string, unknown> = {}
           if (dimension && cat !== undefined) row[dimension] = cat

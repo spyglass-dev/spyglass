@@ -38,6 +38,9 @@ export interface WidgetQuery {
   offset?: number
   /** Ask the engine for the total row/group count (`QueryResult.total`). */
   includeTotal?: boolean
+  /** `rows` returns row-level records (projecting only the cube's published
+   *  `drill_members`) — the records drawer behind a measure click. */
+  mode?: 'aggregate' | 'rows'
 }
 
 /** A data widget being authored: the query + its visualization. Maps 1:1 to a
@@ -111,6 +114,7 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
         key: c.key,
         label: short(c.key),
         align: c.kind === 'measure' ? 'right' : 'left',
+        kind: c.kind,
       })),
       rows: result.rows,
       total: result.total,

@@ -61,6 +61,11 @@ export interface TableColumn {
   label: string
   format?: ValueFormat
   align?: 'left' | 'right' | 'center'
+  /** Result-column kind (`dimension` | `measure` | `time` | `label` | …) —
+   *  what makes a cell drillable (dimensions drill, measures open row mode). */
+  kind?: string
+  /** The dimension's `drill: { entity }` annotation, for host routing. */
+  drillEntity?: string
 }
 
 export interface TableSpec extends WidgetBase {

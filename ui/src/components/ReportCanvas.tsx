@@ -8,17 +8,22 @@
  */
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { RefreshCw, Plus, Trash2, Pencil, TriangleAlert, Sparkles } from 'lucide-react'
-import type { ReportDoc, WidgetSpec } from '../types'
+import type { ReportDoc, TableSpec, WidgetSpec } from '../types'
 import type { WidgetRegistry } from '../registry'
 import { Widget } from './Widget'
-import type { GridQueryDelta } from './DataGrid'
-import { applyGridDelta } from '../querybuilder'
+import { DataGrid, type GridQueryDelta } from './DataGrid'
+import { DrillBreadcrumb } from './DrillBreadcrumb'
+import { routeDrill, type DrillEvent, type DrillRouter } from '../drill'
+import { applyGridDelta, draftToWidgetSpec } from '../querybuilder'
+import { parseReportSearch, reportStateToSearch, type GridUrlState } from '../urlstate'
 import { FilterBar } from './FilterBar'
 import { ReportLoading } from './ReportLoading'
 import { WidgetError } from './WidgetError'
 import { DEFAULT_REPORT_FILTERS, type FilterFacet, type ReportFilters } from '../filters'
 import {
   resolveReport,
+  rowsQueryFor,
+  type BoundWidget,
   type Report,
   type ReportWidget,
   type QueryRunner,
@@ -46,6 +51,15 @@ export interface ReportCanvasProps {
   onEditWidget?: (widget: ReportWidget, index: number) => void
   /** True while the host's agent is building — shows a "building…" indicator. */
   generating?: boolean
+  /** Host drill routing (entity → handler). An event whose entity has no
+   *  route falls back to the default drill-down (filter in place +
+   *  breadcrumb). Omit entirely for default drill-down everywhere. */
+  drillRouter?: DrillRouter
+  /** Mirror filters, drill trail, page and sort to the URL (`?rpt=…`) via
+   *  history.replaceState, and restore them on mount — a copied link
+   *  reproduces the exact view. Off by default (hosts with their own
+   *  routing wire `parseReportSearch`/`reportStateToSearch` themselves). */
+  syncUrl?: boolean
 }
 
 function InsertBar({ onClick }: { onClick?: () => void }) {
@@ -76,17 +90,69 @@ export function ReportCanvas({
   onAddWidget,
   onEditWidget,
   generating,
+  drillRouter,
+  syncUrl,
 }: ReportCanvasProps) {
   const [resolved, setResolved] = useState<ReportDoc | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
+  const [drawer, setDrawer] = useState<{ title: string; spec?: TableSpec; error?: string; loading?: boolean } | null>(null)
+  const [urlRestored, setUrlRestored] = useState(!syncUrl)
 
   const refresh = useCallback(() => setTick((t) => t + 1), [])
   const mergedRegistry = useMemo<WidgetRegistry>(() => ({ widget_error: WidgetError, ...registry }), [registry])
   const filters = report.filters ?? (facets ? DEFAULT_REPORT_FILTERS : undefined)
 
+  // Restore URL state once, before the first resolve — a copied link
+  // reproduces filters, drill trail, page and sort.
   useEffect(() => {
+    if (!syncUrl || urlRestored) return
+    const state = parseReportSearch(window.location.search)
+    let next = report
+    if (state.filters) next = { ...next, filters: state.filters }
+    if (state.drill) next = { ...next, drill: state.drill }
+    if (state.grids) {
+      next = {
+        ...next,
+        widgets: next.widgets.map((w, i) => {
+          const g = state.grids?.[i]
+          if (!g || w.type !== 'bound') return w
+          return {
+            ...w,
+            query: applyGridDelta(w.query, {
+              ...(g.o !== undefined ? { offset: g.o } : {}),
+              ...(g.s ? { order: [{ member: g.s.m, desc: g.s.d }] } : {}),
+            }),
+          }
+        }),
+      }
+    }
+    if (next !== report) onChange(next)
+    setUrlRestored(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Mirror filters, drill trail, page and sort back to the URL.
+  useEffect(() => {
+    if (!syncUrl || !urlRestored) return
+    const grids: Record<number, GridUrlState> = {}
+    report.widgets.forEach((w, i) => {
+      if (w.type !== 'bound') return
+      const offset = w.query.offset
+      const sort = w.query.order?.[0]
+      if (offset || sort)
+        grids[i] = {
+          ...(offset ? { o: offset } : {}),
+          ...(sort ? { s: { m: sort.member, ...(sort.desc ? { d: true } : {}) } } : {}),
+        }
+    })
+    const search = reportStateToSearch({ filters: report.filters, drill: report.drill, grids })
+    window.history.replaceState(null, '', window.location.pathname + search + window.location.hash)
+  }, [syncUrl, urlRestored, report])
+
+  useEffect(() => {
+    if (!urlRestored) return
     let cancelled = false
     setLoading(true)
     setError(null)
@@ -98,7 +164,7 @@ export function ReportCanvas({
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report, tick])
+  }, [report, tick, urlRestored])
 
   const removeAt = (index: number) =>
     onChange({ ...report, widgets: report.widgets.filter((_, i) => i !== index) })
@@ -117,6 +183,36 @@ export function ReportCanvas({
     })
   }
 
+  // Dimension-cell drill: the host's router wins for entities it routes;
+  // everything else drill-DOWNS — append to the trail, re-run in place.
+  const onDrill = (event: DrillEvent) => {
+    routeDrill(event, drillRouter, (e) => {
+      const trail = report.drill ?? []
+      if (trail.some((s) => s.member === e.member && s.value === e.value)) return
+      onChange({ ...report, drill: [...trail, e] })
+    })
+  }
+  const popDrill = (length: number) => onChange({ ...report, drill: (report.drill ?? []).slice(0, length) })
+
+  // Measure-cell click: open the records drawer via a `mode: 'rows'` query.
+  // The engine bounds the projection to the cube's drill_members and refuses
+  // a cube that declares none — the drawer inherits that, it can't widen it.
+  const measureClickAt = (index: number) => async (row: Record<string, unknown>) => {
+    const source = report.widgets[index]
+    if (source?.type !== 'bound') return
+    const bound = source as BoundWidget
+    const title = bound.title ? `Records — ${bound.title}` : 'Records'
+    setDrawer({ title, loading: true })
+    try {
+      const query = rowsQueryFor(bound, row, { filters, drill: report.drill, cubeCaps })
+      const result = await runQuery(query, { studentId: bound.studentId })
+      setDrawer({ title, spec: draftToWidgetSpec({ as: 'table', query }, result) as TableSpec })
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e)
+      setDrawer({ title, error: humanizeError?.(detail) ?? detail })
+    }
+  }
+
   const widgets = resolved?.widgets ?? []
   const failed = widgets.filter((w) => w.type === 'custom' && (w as { component?: string }).component === 'widget_error').length
 
@@ -124,6 +220,12 @@ export function ReportCanvas({
     <div className="flex flex-col">
       {facets && filters && (
         <FilterBar filters={filters} onChange={setFilters} facets={facets} onReset={() => setFilters(DEFAULT_REPORT_FILTERS)} />
+      )}
+
+      {(report.drill?.length ?? 0) > 0 && (
+        <div className="px-1 pt-2">
+          <DrillBreadcrumb trail={report.drill ?? []} onPop={popDrill} />
+        </div>
       )}
 
       <div className="flex flex-col gap-3 p-1 pt-3">
@@ -166,6 +268,8 @@ export function ReportCanvas({
                     spec={spec}
                     registry={mergedRegistry}
                     onGridQuery={source?.type === 'bound' ? gridQueryAt(i) : undefined}
+                    onDrill={source?.type === 'bound' ? onDrill : undefined}
+                    onMeasureClick={source?.type === 'bound' ? measureClickAt(i) : undefined}
                   />
                   <div className="absolute right-1 top-1 flex gap-1 opacity-0 transition-opacity group-hover/w:opacity-100">
                     {editable && (
@@ -194,6 +298,28 @@ export function ReportCanvas({
           </div>
         )}
       </div>
+
+      {drawer && (
+        <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-2xl flex-col gap-3 overflow-y-auto border-l border-border bg-background p-4 shadow-2xl">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-semibold">{drawer.title}</div>
+            <button
+              type="button"
+              onClick={() => setDrawer(null)}
+              className="rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              Close
+            </button>
+          </div>
+          {drawer.loading && <ReportLoading message="Loading records…" />}
+          {drawer.error && (
+            <div className="rounded-lg border border-amber-200/70 bg-amber-50/50 px-3 py-2 text-sm text-amber-800">
+              {drawer.error}
+            </div>
+          )}
+          {drawer.spec && <DataGrid spec={drawer.spec} />}
+        </div>
+      )}
     </div>
   )
 }

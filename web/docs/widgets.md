@@ -59,6 +59,34 @@ Without `onQuery` the grid renders static data — no sort affordances, no pager
   (fixed-height rows, no dependencies).
 - `bars` draws proportional in-cell bars for one measure column.
 
+### Drill: model-driven clicks
+
+Drill belongs to the **model**, not the UI: cubes annotate dimensions with
+`drill: { entity }`, and every table in every report becomes drillable with no
+per-report wiring.
+
+- **Dimension cells emit `DrillEvent`** — `{ member, value, label?, entity? }`
+  (the label comes from the engine's `__label` projection). The host may
+  register a `DrillRouter` (`Record<entity, handler>`) on `ReportCanvas`;
+  routing is host policy, emitting is framework behavior.
+- **With no router — or no route for the entity — the default is
+  drill-DOWN**: the value becomes an `equals` filter, every widget whose cube
+  shares the dimension re-runs in place, and a **poppable breadcrumb**
+  (`All ▸ customer: Karl Seal ▸ status: paid`) records the trail. Popping a
+  segment truncates the trail — drill-down's undo. The trail lives on the
+  report doc (`report.drill`), so it saves and shares like any other state.
+- **Measure cells open row mode**: clicking one runs the widget's
+  fully-filtered scope, narrowed to the clicked row, as a `mode: 'rows'`
+  query, and shows the records in a drawer. The engine projects only the
+  cube's `drill_members` — and refuses a cube that declares none — so the
+  drawer is PII-bounded by the model, not the UI.
+- **URL state**: `reportStateToSearch` / `parseReportSearch` serialize
+  filters, drill trail, page and sort into one `?rpt=…` parameter — a copied
+  link reproduces the exact view. `ReportCanvas syncUrl` wires it via
+  `history.replaceState`; hosts with routers call the helpers themselves.
+  A default view serializes to nothing, and a garbage parameter degrades to
+  the default view, never a crash.
+
 ### Theming: one token layer
 
 Every color the widgets paint routes through `var(--rpt-*, fallback)` custom

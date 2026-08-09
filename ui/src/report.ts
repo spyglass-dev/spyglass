@@ -23,6 +23,7 @@ import {
   type QueryResultLite,
 } from './querybuilder'
 import { resolveDateRange, hasActiveFilters, type FilterFacet, type ReportFilters } from './filters'
+import { applyDrillTrail, type DrillTrail } from './drill'
 
 // ── Filter spec (declared filters) ───────────────────────────────────────────
 
@@ -81,6 +82,9 @@ export interface Report {
   facets?: FacetSpec[]
   /** Selected filter values (date range + facet selections). */
   filters?: ReportFilters
+  /** The drill trail (default drill-down state) — each step filters every
+   *  widget whose cube has the dimension. Poppable via the breadcrumb. */
+  drill?: DrillTrail
 }
 
 /** Run a query against the host's engine. */
@@ -178,6 +182,8 @@ export interface ResolveOptions {
   runQuery: QueryRunner
   /** Report-wide filters (defaults to the report's own `filters`). */
   filters?: ReportFilters
+  /** Drill trail to apply (defaults to the report's own `drill`). */
+  drill?: DrillTrail
   /** Cube capabilities for filter application (none = no report filters). */
   cubeCaps?: CubeCapsMap
   /** Map a raw error to a friendly one-liner for the error widget. */
@@ -194,8 +200,12 @@ export async function resolveBound(
   opts: ResolveOptions,
 ): Promise<WidgetSpec> {
   const { query, applied } = applyFilters(widget, opts.filters, opts.cubeCaps ?? {})
-  const result = await opts.runQuery(query, { studentId: widget.studentId })
-  const spec: WidgetSpec = { ...draftToWidgetSpec(widget, result), applied }
+  const cube = queryCube(query)
+  const drilled = opts.drill?.length
+    ? applyDrillTrail(query, opts.drill, cube, cube ? opts.cubeCaps?.[cube]?.dims : undefined)
+    : query
+  const result = await opts.runQuery(drilled, { studentId: widget.studentId })
+  const spec: WidgetSpec = { ...draftToWidgetSpec({ ...widget, query: drilled }, result), applied }
   return widget.w ? { ...spec, w: widget.w } : spec
 }
 
@@ -204,11 +214,12 @@ export async function resolveBound(
  *  the report (render it with a host `widget_error` renderer). */
 export async function resolveReport(report: Report, opts: ResolveOptions): Promise<ReportDoc> {
   const filters = opts.filters ?? report.filters
+  const drill = opts.drill ?? report.drill
   const widgets = await Promise.all(
     report.widgets.map(async (w): Promise<WidgetSpec> => {
       if (!isBound(w)) return w
       try {
-        return await resolveBound(w, { ...opts, filters })
+        return await resolveBound(w, { ...opts, filters, drill })
       } catch (e) {
         const detail = e instanceof Error ? e.message : String(e)
         return {
@@ -222,6 +233,37 @@ export async function resolveReport(report: Report, opts: ResolveOptions): Promi
     }),
   )
   return { title: report.title, description: report.description, widgets }
+}
+
+/**
+ * The records query behind a measure click: the widget's fully-filtered scope
+ * (report filters + drill trail), narrowed to the clicked row's dimension
+ * values, switched to `mode: 'rows'`. The engine projects only the cube's
+ * `drill_members` — and REFUSES a cube that declares none — so this is
+ * PII-bounded by the model, not by the UI.
+ */
+export function rowsQueryFor(
+  widget: BoundWidget,
+  row: Record<string, unknown>,
+  opts: { filters?: ReportFilters; drill?: DrillTrail; cubeCaps?: CubeCapsMap },
+  limit = 50,
+): WidgetQuery {
+  const { query } = applyFilters(widget, opts.filters, opts.cubeCaps ?? {})
+  const cube = queryCube(query)
+  const drilled = opts.drill?.length
+    ? applyDrillTrail(query, opts.drill, cube, cube ? opts.cubeCaps?.[cube]?.dims : undefined)
+    : query
+  const filters: QueryFilter[] = [...(drilled.filters ?? [])]
+  for (const dim of drilled.dimensions ?? []) {
+    if (row[dim] === undefined) continue
+    filters.push({ member: dim, operator: 'equals', values: [row[dim] as string | number | boolean | null] })
+  }
+  return {
+    filters,
+    timeDimensions: drilled.timeDimensions,
+    mode: 'rows',
+    limit,
+  }
 }
 
 // ── Draft <-> bound widget ───────────────────────────────────────────────────
