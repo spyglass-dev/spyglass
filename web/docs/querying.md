@@ -107,12 +107,30 @@ tenant flag, and no SQL:
 reports cubes/measures/dimensions — for CI or an agent self-checking generated
 cubes.
 
+## Joins in queries
+
+A query's measures pick its **base cube**; dimensions and filters may
+reference other cubes reachable over the model's [`joins:`](./cube-format.md#joins)
+edges, and the compiler emits `LEFT JOIN`s automatically. A labelled dimension
+adds its `"{member}__label"` column to the result without being asked.
+
+Two refusals are guarantees, not gaps:
+
+- `FanOut` — the query would traverse a `one_to_many` edge, duplicating base
+  rows and inflating aggregates. Declare the query on the many side.
+- `MissingTenantScope` — *any* cube in the join tree declares a tenant
+  dimension the `SecurityContext` has no scope for. Joins never widen tenant
+  access.
+
 ## Compiler guarantees
 
 - **Injection-safe** — values are bound parameters; only declared members reach
   SQL.
 - **Scoped by construction** — no query can escape the tenant filter or touch
-  raw tables.
+  raw tables; tenant scope applies to **every cube in a join tree**, and its
+  absence is a compile error.
+- **No silent fan-out** — a join that would multiply rows is a compile error
+  (`FanOut`), never a quietly wrong number.
 - **Pure** — the compiler (`Query` + `Model` + `SecurityContext` → SQL) needs no
   database, which is why the test suite runs offline.
 

@@ -34,7 +34,7 @@ impl Model {
 }
 
 /// One cube — a queryable entity backed by a base relation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Cube {
     /// Cube name (also the member prefix, e.g. `Submissions.count`). Under a
     /// `cubes:` map it's backfilled from the map key by the loader, so cube
@@ -55,6 +55,42 @@ pub struct Cube {
     pub measures: BTreeMap<String, Measure>,
     #[serde(default)]
     pub dimensions: BTreeMap<String, Dimension>,
+    /// Joins to other cubes, keyed by target cube name. Only `many_to_one` /
+    /// `one_to_one` edges are traversable; a `one_to_many` edge documents the
+    /// relationship but any query traversing it is a compile error ([`FanOut`]
+    /// (crate::compiler::CompileError::FanOut)) — it would duplicate measure
+    /// rows and silently inflate every aggregate.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub joins: BTreeMap<String, Join>,
+    /// Row-mode allowlist: the members (local dimension keys or qualified
+    /// `Cube.member` names) a row-level query may project. Deliberately also
+    /// the PII boundary — row mode can only ever reveal what a cube explicitly
+    /// published here. Empty = row mode unavailable for this cube.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drill_members: Vec<String>,
+}
+
+/// How a join edge relates the declaring cube's rows to the target's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JoinRelationship {
+    /// Many declaring rows → one target row. Safe to traverse (no fan-out).
+    ManyToOne,
+    /// One declaring row → one target row. Safe to traverse.
+    OneToOne,
+    /// One declaring row → many target rows. Declarable for documentation,
+    /// never traversable: it would multiply the base cube's rows.
+    OneToMany,
+}
+
+/// A join edge to another cube.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Join {
+    pub relationship: JoinRelationship,
+    /// Join condition. `${CUBE}` refers to the declaring cube; `${Other}`
+    /// (any cube name) refers to that cube — both resolve to the quoted cube
+    /// alias, e.g. `"${CUBE}.workspace_id = ${Workspaces}.workspace_id"`.
+    pub sql: String,
 }
 
 impl Cube {
@@ -69,9 +105,10 @@ impl Cube {
 }
 
 /// How a measure aggregates. Mirrors Cube's measure types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MeasureType {
+    #[default]
     Count,
     CountDistinct,
     Sum,
@@ -83,7 +120,7 @@ pub enum MeasureType {
 }
 
 /// A measure: an aggregation over the cube's rows.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Measure {
     #[serde(rename = "type")]
     pub measure_type: MeasureType,
@@ -95,12 +132,18 @@ pub struct Measure {
     /// Display format hint for the UI (e.g. `percent`, `number`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
+    /// Narrows the cube's `drill_members` for row-mode queries reached through
+    /// this measure. May only ever be a subset — a measure narrows the cube's
+    /// published record shape, it never widens it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drill_members: Option<Vec<String>>,
 }
 
 /// Dimension value type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DimensionType {
+    #[default]
     String,
     Number,
     Time,
@@ -108,7 +151,7 @@ pub enum DimensionType {
 }
 
 /// A dimension: a column to group by or filter on.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Dimension {
     #[serde(rename = "type")]
     pub dimension_type: DimensionType,
@@ -122,6 +165,25 @@ pub struct Dimension {
     /// callers/tools discover which dimension carries the tenant.
     #[serde(default, skip_serializing_if = "is_false")]
     pub tenant: bool,
+    /// Member whose value is DISPLAYED for this dimension (e.g. an id
+    /// dimension labelled by a joined cube's name column: `label:
+    /// Workspaces.workspace_name`, or an unqualified same-cube dimension).
+    /// Auto-projected as `"{member}__label"` whenever the dimension is
+    /// selected; sorting, filtering and grouping still act on the id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// What a click on this dimension's value MEANS — the entity it
+    /// identifies. The UI emits a typed `DrillEvent { member, value, label,
+    /// entity }`; hosts route entities they know, and the default with no
+    /// router is drill-down-in-place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drill: Option<DrillTarget>,
+}
+
+/// A dimension's drill annotation: the entity a click resolves to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrillTarget {
+    pub entity: String,
 }
 
 fn is_false(b: &bool) -> bool {
