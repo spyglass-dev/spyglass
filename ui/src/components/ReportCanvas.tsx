@@ -20,6 +20,7 @@ import { parseReportSearch, reportStateToSearch, type GridUrlState } from '../ur
 import { FilterBar } from './FilterBar'
 import { ReportLoading } from './ReportLoading'
 import { WidgetError } from './WidgetError'
+import { AllTimeChip } from './AllTimeChip'
 import { DEFAULT_REPORT_FILTERS, type FilterFacet, type ReportFilters } from '../filters'
 import {
   resolveReport,
@@ -263,10 +264,17 @@ export function ReportCanvas({
             {widgets.map((spec: WidgetSpec, i) => {
               const source = report.widgets[i]
               const editable = onEditWidget && source?.type === 'bound'
+              const showTitle = spec.title && spec.type !== 'metric'
+              const skipped = spec.applied?.dateRangeSkipped
               return (
                 <section key={spec.id ?? i} style={span(spec.w)} className="group/w relative">
-                  {spec.title && spec.type !== 'metric' && (
-                    <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{spec.title}</div>
+                  {(showTitle || skipped) && (
+                    <div className="mb-1.5 flex items-center gap-2">
+                      {showTitle && (
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{spec.title}</span>
+                      )}
+                      {skipped && <AllTimeChip reason={skipped} />}
+                    </div>
                   )}
                   <Widget
                     spec={spec}

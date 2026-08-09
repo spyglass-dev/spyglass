@@ -27,6 +27,12 @@ export const tokens = {
   positive: 'var(--rpt-positive, #059669)',
   /** Negative delta / trend-down. */
   negative: 'var(--rpt-negative, #e11d48)',
+  /** Warning text — the "all time" / unreachable-scope marker. */
+  warnText: 'var(--rpt-warn-text, #92400e)',
+  /** Warning wash behind the marker. */
+  warnBg: 'var(--rpt-warn-bg, #fef3c7)',
+  /** Warning border around the marker. */
+  warnBorder: 'var(--rpt-warn-border, #fcd34d)',
 } as const
 
 export type Tokens = typeof tokens
