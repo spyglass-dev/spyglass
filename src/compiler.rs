@@ -64,6 +64,12 @@ pub enum CompileError {
          published a record shape"
     )]
     NoDrillMembers(String),
+    #[error("fill_gaps: {0}")]
+    BadFillGaps(String),
+    #[error("compare: {0}")]
+    BadCompare(String),
+    #[error("calculated-measure cycle through '{0}' — load-time validation should have caught this")]
+    CalculatedCycle(String),
 }
 
 /// A compiled, parameterized statement ready for an engine to execute.
@@ -135,6 +141,11 @@ fn referenced_cubes(model: &Model, query: &Query) -> Result<Vec<String>, Compile
     }
     for f in &query.filters {
         push(&f.member)?;
+    }
+    // A segment's cube participates like any referenced cube — its joins are
+    // planned and, crucially, its tenant scope is enforced.
+    for s in &query.segments {
+        push(s)?;
     }
     // A selected dimension's label pulls the label's cube into the query even
     // when nothing else references it — that is the point of labels.
@@ -292,14 +303,31 @@ fn dimension_expr(
 }
 
 fn measure_expr(cube: &Cube, field: &str, has_joins: bool) -> Result<String, CompileError> {
+    measure_expr_guarded(cube, field, has_joins, &mut Vec::new())
+}
+
+fn measure_expr_guarded(
+    cube: &Cube,
+    field: &str,
+    has_joins: bool,
+    stack: &mut Vec<String>,
+) -> Result<String, CompileError> {
     let m = cube
         .measures
         .get(field)
         .ok_or_else(|| CompileError::UnknownMember(format!("{}.{}", cube.name, field)))?;
-    let sql = m
-        .sql
-        .as_ref()
-        .map(|s| qualify_expr(s, cube, has_joins));
+    // A `number` measure's SQL may interpolate `${CUBE.measure}` — resolved
+    // to the referenced measure's COMPILED aggregate expression, recursively.
+    // This is what makes ratios like `${CUBE.published} / nullif(${CUBE.count}, 0)`
+    // declarable. Only declared members interpolate, so injection-safety is
+    // preserved by construction; cycles are refused (validated at load too).
+    let sql = match (&m.sql, m.measure_type) {
+        (Some(sql), MeasureType::Number) => {
+            Some(interpolate_measures(cube, field, sql, has_joins, stack)?)
+        }
+        (Some(sql), _) => Some(qualify_expr(sql, cube, has_joins)),
+        (None, _) => None,
+    };
     Ok(match m.measure_type {
         MeasureType::Count => "count(*)".to_string(),
         MeasureType::CountDistinct => format!(
@@ -313,6 +341,52 @@ fn measure_expr(cube: &Cube, field: &str, has_joins: bool) -> Result<String, Com
         MeasureType::Max => format!("max({})::float8", req_sql(sql, field)?),
         MeasureType::Number => format!("({})::float8", req_sql(sql, field)?),
     })
+}
+
+/// Replace `${CUBE.m}` / `${<OwnCube>.m}` tokens with the referenced
+/// measure's compiled expression. `${CUBE}` (no member) stays for
+/// `qualify_expr` to turn into the alias; any other token is refused.
+fn interpolate_measures(
+    cube: &Cube,
+    field: &str,
+    sql: &str,
+    has_joins: bool,
+    stack: &mut Vec<String>,
+) -> Result<String, CompileError> {
+    if stack.iter().any(|f| f == field) {
+        return Err(CompileError::CalculatedCycle(format!("{}.{}", cube.name, field)));
+    }
+    stack.push(field.to_string());
+    let mut out = String::new();
+    let mut rest = sql;
+    while let Some(start) = rest.find("${") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let Some(len) = after.find('}') else {
+            out.push_str(&rest[start..]);
+            rest = "";
+            break;
+        };
+        let token = &after[..len];
+        match token.split_once('.') {
+            Some((target, member)) if target == "CUBE" || target == cube.name => {
+                out.push_str(&measure_expr_guarded(cube, member, has_joins, stack)?);
+            }
+            None if token == "CUBE" => out.push_str("${CUBE}"),
+            _ => {
+                stack.pop();
+                return Err(CompileError::UnknownMember(format!(
+                    "${{{token}}} in {}.{field} — only ${{CUBE.<measure>}} of the same cube \
+                     may be interpolated",
+                    cube.name
+                )));
+            }
+        }
+        rest = &after[len + 1..];
+    }
+    out.push_str(rest);
+    stack.pop();
+    Ok(qualify_expr(&out, cube, has_joins))
 }
 
 fn req_sql(sql: Option<String>, field: &str) -> Result<String, CompileError> {
@@ -405,12 +479,57 @@ pub fn compile(
 
 /// Compile with an injected clock: relative date expressions resolve against
 /// `now` in the query's `timezone`. Pure — same inputs, same SQL.
+/// Check the constraints `compare` and `fill_gaps` share: a date range to
+/// anchor on, aggregate mode, and the time dimension as the query's ONLY
+/// grouping (no dimensions, one time dimension) — the v1 contract that keeps
+/// bucket alignment and series generation honest. `fill_gaps` additionally
+/// needs a granularity (there is no bucket size to fill without one).
+fn validate_time_features(query: &Query) -> Result<(), CompileError> {
+    let uses = |name: &str, extra: &str| -> CompileError {
+        let msg = format!(
+            "requires a date_range, aggregate mode, and the time dimension as the query's only \
+             grouping (no dimensions, a single time dimension){extra}"
+        );
+        match name {
+            "fill_gaps" => CompileError::BadFillGaps(msg),
+            _ => CompileError::BadCompare(msg),
+        }
+    };
+    for td in &query.time_dimensions {
+        for (name, active) in [("fill_gaps", td.fill_gaps), ("compare", td.compare.is_some())] {
+            if !active {
+                continue;
+            }
+            let solo = query.dimensions.is_empty()
+                && query.time_dimensions.len() == 1
+                && query.mode != QueryMode::Rows
+                && td.date_range.is_some();
+            if !solo {
+                return Err(uses(name, ""));
+            }
+            if name == "fill_gaps" && td.granularity.is_none() {
+                return Err(uses(name, ", plus a granularity to size the buckets"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The gap-fill wrapping plan, captured while compiling the inner query.
+struct FillSpec {
+    alias: String,
+    granularity: crate::query::Granularity,
+    from_param: usize,
+    to_param: usize,
+}
+
 pub fn compile_at(
     model: &Model,
     query: &Query,
     ctx: &SecurityContext,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<Compiled, CompileError> {
+    validate_time_features(query)?;
     let normalized = normalize_rows_mode(model, query)?;
     let query: &Query = normalized.as_ref();
     let is_rows = query.mode == QueryMode::Rows;
@@ -456,15 +575,17 @@ pub fn compile_at(
         }
     }
 
-    // Time dimensions (optionally truncated), also group-by.
+    // Time dimensions with a granularity are projected + grouped as buckets.
+    // WITHOUT a granularity a time dimension is filter-only (its date_range
+    // applies below, nothing is projected) — Cube's semantics, and what lets
+    // a metric query carry a date window or comparison here.
+    let filling = query.time_dimensions.iter().any(|td| td.fill_gaps);
     for td in &query.time_dimensions {
+        let Some(g) = &td.granularity else { continue };
         let (_, field) = split_member(&td.dimension)?;
         let cube = plan.cube_for(&td.dimension)?;
         let (expr, _) = dimension_expr(cube, field, has_joins)?;
-        let projected = match &td.granularity {
-            Some(g) => format!("date_trunc('{}', {})::text", g.as_pg(), expr),
-            None => format!("({})::text", expr),
-        };
+        let projected = format!("date_trunc('{}', {})::text", g.as_pg(), expr);
         select.push(format!("{} as {}", projected, quote(&td.dimension)));
         if !is_rows {
             group_by.push(projected);
@@ -487,8 +608,9 @@ pub fn compile_at(
     // The row total rides the same statement as one window column — on a
     // grouped query it counts groups (what "1–25 of 312" means), and being
     // a window it is computed before LIMIT/OFFSET, so it reflects the whole
-    // result set, not the page. The engine strips it into `total`.
-    if query.include_total {
+    // result set, not the page. The engine strips it into `total`. When
+    // gap-filling, the total belongs on the OUTER query (it counts buckets).
+    if query.include_total && !filling {
         select.push(format!("count(*) over () as {}", quote(TOTAL_ALIAS)));
         columns.push(Column { key: TOTAL_ALIAS.into(), kind: "total".into() });
     }
@@ -510,16 +632,24 @@ pub fn compile_at(
         }
         where_parts.push(compile_filter(cube, has_joins, f, &mut params)?);
     }
+    // Segments: named model-declared predicates, parenthesized into WHERE.
+    // The segment's cube is already a participant (referenced_cubes), so its
+    // joins and tenant scope apply like anything else.
+    for seg in &query.segments {
+        let (_, seg_name) = split_member(seg)?;
+        let cube = plan.cube_for(seg)?;
+        let segment = cube
+            .segments
+            .get(seg_name)
+            .ok_or_else(|| CompileError::UnknownMember(seg.clone()))?;
+        where_parts.push(format!("({})", join_condition(&segment.sql, cube, model)));
+    }
     let tz = crate::dates::parse_tz(query.timezone.as_deref()).map_err(CompileError::BadTimezone)?;
+    let mut fill: Option<FillSpec> = None;
     for td in &query.time_dimensions {
         if let Some(range) = &td.date_range {
-            let (from, to) = match range {
-                crate::query::DateRange::Absolute([from, to]) => (from.clone(), to.clone()),
-                crate::query::DateRange::Relative(spec) => {
-                    crate::dates::resolve_relative(spec, now, tz)
-                        .map_err(CompileError::BadDateRange)?
-                }
-            };
+            let (from, to) = crate::dates::resolve_date_range(range, now, tz)
+                .map_err(CompileError::BadDateRange)?;
             let (_, field) = split_member(&td.dimension)?;
             let cube = plan.cube_for(&td.dimension)?;
             let (expr, dt) = dimension_expr(cube, field, has_joins)?;
@@ -527,6 +657,14 @@ pub fn compile_at(
             where_parts.push(format!("{} >= {}", expr, placeholder(params.len(), dt)));
             params.push(ScalarValue::String(to));
             where_parts.push(format!("{} < {}", expr, placeholder(params.len(), dt)));
+            if td.fill_gaps {
+                fill = Some(FillSpec {
+                    alias: td.dimension.clone(),
+                    granularity: td.granularity.expect("validated: fill_gaps has granularity"),
+                    from_param: params.len() - 1,
+                    to_param: params.len(),
+                });
+            }
         }
     }
     // Fail closed for EVERY cube in the join tree, not just the base: a
@@ -614,8 +752,36 @@ pub fn compile_at(
     if !having_parts.is_empty() {
         sql.push_str(&format!("\nhaving {}", having_parts.join(" and ")));
     }
+
+    // Gap filling: wrap the aggregate in a generate_series LEFT JOIN over the
+    // window's buckets, so an empty bucket appears as 0 instead of vanishing.
+    // The series reuses the window's own bind parameters; a missing bucket's
+    // measures coalesce to 0 — the point of the feature.
+    if let Some(fill) = &fill {
+        let step = fill.granularity.series_step();
+        let trunc = fill.granularity.as_pg();
+        let alias = quote(&fill.alias);
+        let mut outer: Vec<String> = vec![format!("gs.bucket::text as {alias}")];
+        for member in &query.measures {
+            let m = quote(member);
+            outer.push(format!("coalesce(q.{m}, 0) as {m}"));
+        }
+        if query.include_total {
+            outer.push(format!("count(*) over () as {}", quote(TOTAL_ALIAS)));
+            columns.push(Column { key: TOTAL_ALIAS.into(), kind: "total".into() });
+        }
+        sql = format!(
+            "select {}\nfrom generate_series(date_trunc('{trunc}', ${}::timestamptz), ${}::timestamptz - interval '{step}', interval '{step}') as gs(bucket)\nleft join (\n{sql}\n) as q on q.{alias} = gs.bucket::text",
+            outer.join(", "),
+            fill.from_param,
+            fill.to_param,
+        );
+    }
+
     if !order_parts.is_empty() {
         sql.push_str(&format!("\norder by {}", order_parts.join(", ")));
+    } else if fill.is_some() {
+        sql.push_str("\norder by gs.bucket");
     }
     if let Some(limit) = query.limit {
         sql.push_str(&format!("\nlimit {limit}"));

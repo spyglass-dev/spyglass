@@ -135,6 +135,58 @@ fn day_to_utc(date: NaiveDate, tz: Tz) -> String {
     local.with_timezone(&Utc).to_rfc3339()
 }
 
+/// Resolve either form of a query date range to concrete `[from, to)`
+/// instants: absolute pairs pass through, relative expressions resolve
+/// against `now` in `tz`.
+pub fn resolve_date_range(
+    range: &crate::query::DateRange,
+    now: DateTime<Utc>,
+    tz: Tz,
+) -> Result<(String, String), String> {
+    match range {
+        crate::query::DateRange::Absolute([from, to]) => Ok((from.clone(), to.clone())),
+        crate::query::DateRange::Relative(spec) => resolve_relative(spec, now, tz),
+    }
+}
+
+/// The comparison window for a resolved `[from, to)`: `previous_period`
+/// shifts back by the window's own width; `previous_year` shifts both ends
+/// one calendar year (Feb 29 clamps to Feb 28).
+pub fn shift_window(
+    from: &str,
+    to: &str,
+    compare: crate::query::Compare,
+) -> Result<(String, String), String> {
+    let parse = |s: &str| -> Result<DateTime<Utc>, String> {
+        // Accept RFC3339 or a bare date (midnight UTC), same as Postgres
+        // accepts for timestamptz input.
+        DateTime::parse_from_rfc3339(s)
+            .map(|d| d.with_timezone(&Utc))
+            .or_else(|_| {
+                NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                    .map(|d| Utc.from_utc_datetime(&d.and_hms_opt(0, 0, 0).expect("midnight")))
+                    .map_err(|_| format!("unparseable date '{s}' (expected RFC3339 or YYYY-MM-DD)"))
+            })
+    };
+    let (from_dt, to_dt) = (parse(from)?, parse(to)?);
+    let (prev_from, prev_to) = match compare {
+        crate::query::Compare::PreviousPeriod => {
+            let width = to_dt - from_dt;
+            (from_dt - width, to_dt - width)
+        }
+        crate::query::Compare::PreviousYear => {
+            let back = |d: DateTime<Utc>| {
+                d.with_year(d.year() - 1).unwrap_or_else(|| {
+                    // Feb 29 → Feb 28 of the previous (non-leap) year.
+                    d.with_day(28).and_then(|d| d.with_year(d.year() - 1)).expect("clamped date exists")
+                })
+            };
+            (back(from_dt), back(to_dt))
+        }
+    };
+    Ok((prev_from.to_rfc3339(), prev_to.to_rfc3339()))
+}
+
 /// Parse an IANA timezone name (default UTC when absent/empty).
 pub fn parse_tz(name: Option<&str>) -> Result<Tz, String> {
     match name.map(str::trim).filter(|s| !s.is_empty()) {
@@ -207,6 +259,29 @@ mod tests {
         let err = resolve_relative("sometime recently", at("2026-08-09T00:00:00Z"), chrono_tz::UTC).unwrap_err();
         assert!(err.contains("accepted:"), "err: {err}");
         assert!(resolve_relative("last 0 days", at("2026-08-09T00:00:00Z"), chrono_tz::UTC).is_err());
+    }
+
+    #[test]
+    fn previous_period_shifts_by_window_width() {
+        let (from, to) = shift_window(
+            "2026-08-01T00:00:00+00:00",
+            "2026-09-01T00:00:00+00:00",
+            crate::query::Compare::PreviousPeriod,
+        )
+        .unwrap();
+        // Width is 31 days, so the previous window is [Jul 1, Aug 1).
+        assert_eq!((from.as_str(), to.as_str()), ("2026-07-01T00:00:00+00:00", "2026-08-01T00:00:00+00:00"));
+    }
+
+    #[test]
+    fn previous_year_shifts_calendar_year_and_accepts_bare_dates() {
+        let (from, to) =
+            shift_window("2026-03-01", "2026-04-01", crate::query::Compare::PreviousYear).unwrap();
+        assert_eq!((from.as_str(), to.as_str()), ("2025-03-01T00:00:00+00:00", "2025-04-01T00:00:00+00:00"));
+        // Feb 29 clamps instead of failing.
+        let (from, _) =
+            shift_window("2024-02-29", "2024-03-01", crate::query::Compare::PreviousYear).unwrap();
+        assert_eq!(from, "2023-02-28T00:00:00+00:00");
     }
 
     #[test]
