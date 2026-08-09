@@ -50,6 +50,15 @@ pub enum CompileError {
     FanOut { from: String, to: String },
     #[error("row mode takes no measures (got '{0}') — request dimensions only")]
     RowsWithMeasures(String),
+    #[error("{0}")]
+    BadDateRange(String),
+    #[error("{0}")]
+    BadTimezone(String),
+    #[error(
+        "query uses a relative date range ('{0}') but compile() has no clock — use compile_at() \
+         with an explicit 'now' (the engine does this; the compiler never reads system time)"
+    )]
+    RelativeDateNeedsClock(String),
     #[error(
         "cube '{0}' declares no drill_members, so row mode is unavailable — the cube has not \
          published a record shape"
@@ -378,10 +387,29 @@ fn normalize_rows_mode<'q>(
     Ok(Cow::Owned(normalized))
 }
 
+/// Compile without a clock. Absolute date ranges work as always; a RELATIVE
+/// range (`"last 30 days"`) is refused — resolution requires a clock, and the
+/// compiler never reads system time. Runtime callers use [`compile_at`].
 pub fn compile(
     model: &Model,
     query: &Query,
     ctx: &SecurityContext,
+) -> Result<Compiled, CompileError> {
+    for td in &query.time_dimensions {
+        if let Some(crate::query::DateRange::Relative(spec)) = &td.date_range {
+            return Err(CompileError::RelativeDateNeedsClock(spec.clone()));
+        }
+    }
+    compile_at(model, query, ctx, chrono::DateTime::UNIX_EPOCH)
+}
+
+/// Compile with an injected clock: relative date expressions resolve against
+/// `now` in the query's `timezone`. Pure — same inputs, same SQL.
+pub fn compile_at(
+    model: &Model,
+    query: &Query,
+    ctx: &SecurityContext,
+    now: chrono::DateTime<chrono::Utc>,
 ) -> Result<Compiled, CompileError> {
     let normalized = normalize_rows_mode(model, query)?;
     let query: &Query = normalized.as_ref();
@@ -482,14 +510,22 @@ pub fn compile(
         }
         where_parts.push(compile_filter(cube, has_joins, f, &mut params)?);
     }
+    let tz = crate::dates::parse_tz(query.timezone.as_deref()).map_err(CompileError::BadTimezone)?;
     for td in &query.time_dimensions {
-        if let Some([from, to]) = &td.date_range {
+        if let Some(range) = &td.date_range {
+            let (from, to) = match range {
+                crate::query::DateRange::Absolute([from, to]) => (from.clone(), to.clone()),
+                crate::query::DateRange::Relative(spec) => {
+                    crate::dates::resolve_relative(spec, now, tz)
+                        .map_err(CompileError::BadDateRange)?
+                }
+            };
             let (_, field) = split_member(&td.dimension)?;
             let cube = plan.cube_for(&td.dimension)?;
             let (expr, dt) = dimension_expr(cube, field, has_joins)?;
-            params.push(ScalarValue::String(from.clone()));
+            params.push(ScalarValue::String(from));
             where_parts.push(format!("{} >= {}", expr, placeholder(params.len(), dt)));
-            params.push(ScalarValue::String(to.clone()));
+            params.push(ScalarValue::String(to));
             where_parts.push(format!("{} < {}", expr, placeholder(params.len(), dt)));
         }
     }

@@ -25,6 +25,7 @@
 pub mod analyze;
 pub mod compiler;
 pub mod context;
+pub mod dates;
 pub mod engine;
 pub mod introspect;
 pub mod loader;
@@ -34,7 +35,7 @@ pub mod model;
 pub mod query;
 pub mod report;
 
-pub use compiler::{compile, CompileError, Compiled};
+pub use compiler::{compile, compile_at, CompileError, Compiled};
 pub use context::SecurityContext;
 pub use analyze::{AnalyzeFilter, AnalyzeOptions, ColumnProfile, DbProfile, TableProfile};
 pub use introspect::{ColumnDef, RawSchema, TableDef};
@@ -46,8 +47,8 @@ pub use model::{
     Model,
 };
 pub use query::{
-    Column, Filter, FilterOperator, Granularity, Order, Query, QueryResult, ScalarValue,
-    TimeDimension,
+    Column, DateRange, Filter, FilterOperator, Granularity, Order, Query, QueryMode,
+    QueryResult, ScalarValue, TimeDimension,
 };
 
 #[cfg(feature = "postgres")]
