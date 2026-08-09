@@ -54,9 +54,8 @@ fn compiles_group_by_with_scope() {
             operator: FilterOperator::Equals,
             values: vec![ScalarValue::String("graded".into())],
         }],
-        time_dimensions: vec![],
-        order: vec![],
         limit: Some(100),
+        ..Default::default()
     };
     let ctx = SecurityContext::default()
         .with_scope("Submissions.workspace_id", ScalarValue::String("w1".into()));
@@ -146,7 +145,11 @@ fn time_dimension_truncates_and_ranges() {
 }
 
 #[test]
-fn rejects_filter_on_measure() {
+fn filter_on_measure_routes_to_having() {
+    // Formerly a rejection (CompileError::MeasureFilter); measure filters now
+    // compile into HAVING against the aggregate expression, which is what
+    // makes "top/worst/only-if" questions buildable. The full HAVING contract
+    // is locked in tests/query_shapes.rs.
     let model = submissions_model();
     let query = Query {
         measures: vec!["Submissions.count".into()],
@@ -157,8 +160,11 @@ fn rejects_filter_on_measure() {
         }],
         ..Default::default()
     };
-    let err = spyglass::compile(&model, &query, &SecurityContext::default()).unwrap_err();
-    assert!(matches!(err, spyglass::CompileError::MeasureFilter(_)));
+    let ctx = SecurityContext::default()
+        .with_scope("Submissions.workspace_id", ScalarValue::String("w1".into()));
+    let c = spyglass::compile(&model, &query, &ctx).expect("compiles");
+    assert!(c.sql.contains("\nhaving count(*) > $2"), "sql: {}", c.sql);
+    assert!(!c.sql.contains("where count"), "aggregate must not reach WHERE: {}", c.sql);
 }
 
 #[test]

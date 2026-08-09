@@ -24,6 +24,33 @@ pub struct Query {
     pub order: Vec<Order>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
+    /// Rows to skip before the first returned row (server-driven paging).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
+    /// Ask for the total row count via one `count(*) over ()` window column —
+    /// one query, not two; on a grouped query it counts *groups*, which is
+    /// what "1–25 of 312" means. Returned as `QueryResult.total`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub include_total: bool,
+    /// `aggregate` (default) groups and aggregates; `rows` returns row-level
+    /// records, projecting only the cube's published `drill_members`.
+    #[serde(default, skip_serializing_if = "is_default_mode")]
+    pub mode: QueryMode,
+}
+
+/// How a query reads the cube: aggregated (the default) or row-level.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryMode {
+    #[default]
+    Aggregate,
+    /// Row-level records. No grouping; the projection is restricted to the
+    /// cube's `drill_members` (its published record shape and PII boundary).
+    Rows,
+}
+
+fn is_default_mode(m: &QueryMode) -> bool {
+    *m == QueryMode::Aggregate
 }
 
 impl Query {
@@ -126,6 +153,20 @@ pub struct QueryResult {
     /// raw schema; just the generated statement).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sql: Option<String>,
+    /// Total matching rows/groups, present when the query asked
+    /// `include_total`. Counted by the same statement (`count(*) over ()`),
+    /// so it reflects filters and scope, not the page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    /// True when rows beyond this page exist (`offset + rows.len() < total`).
+    /// Only meaningful when `total` is known; false otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_more: bool,
+    /// Set when the engine's row cap clamped an unbounded (or larger) request
+    /// and the result hit the cap — so a UI can tell a truncated table from a
+    /// complete one instead of presenting a silent cutoff as the whole story.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncated_at: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

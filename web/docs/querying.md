@@ -107,6 +107,40 @@ tenant flag, and no SQL:
 reports cubes/measures/dimensions — for CI or an agent self-checking generated
 cubes.
 
+## Pagination and totals
+
+`limit`, `offset`, and `includeTotal` page a query server-side:
+
+```json
+{ "measures": ["Orders.count"], "dimensions": ["Orders.status"],
+  "limit": 25, "offset": 50, "includeTotal": true }
+```
+
+`includeTotal` adds one `count(*) over ()` window column to the same
+statement — one query, not two; on a grouped query it counts **groups**,
+which is what "1–25 of 312" means. The engine strips it into
+`QueryResult.total` and derives `has_more`. When the engine has a row cap
+(`with_max_rows` / `SPYGLASS_MAX_ROWS`), a clamped result that fills the cap
+is reported via `truncated_at` — a truncated table must never look complete.
+
+## Measure filters (HAVING)
+
+A filter whose member is a **measure** compiles into `HAVING` against the
+aggregate expression — "customers with revenue ≥ 1000" is
+`{ "member": "Orders.revenue", "operator": "gte", "values": [1000] }`. This
+is what makes "top/worst/only-if" questions buildable. Dimension filters
+stay in `WHERE`; the split is by member kind, not by position.
+
+## Row mode
+
+`"mode": "rows"` returns row-level records instead of aggregates: no
+grouping, and the projection is the requested dimensions ∩ the cube's
+[`drill_members`](./cube-format.md#row-mode-boundary-drill_members) (all of
+them when none are requested). A cube without `drill_members` refuses row
+mode — it has not published a record shape. Filters, tenant scope, order
+and pagination all apply unchanged; measures and measure filters are
+compile errors.
+
 ## Joins in queries
 
 A query's measures pick its **base cube**; dimensions and filters may

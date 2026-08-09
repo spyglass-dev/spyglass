@@ -15,6 +15,9 @@ fn result(columns: &[(&str, &str)], rows: Vec<serde_json::Value>) -> QueryResult
             .into_iter()
             .map(|v| v.as_object().unwrap().clone())
             .collect(),
+        total: None,
+        has_more: false,
+        truncated_at: None,
         sql: None,
     }
 }

@@ -14,7 +14,8 @@
 
 use crate::context::SecurityContext;
 use crate::model::{Cube, DimensionType, Join, JoinRelationship, MeasureType, Model};
-use crate::query::{Column, Filter, FilterOperator, Query, ScalarValue};
+use crate::query::{Column, Filter, FilterOperator, Query, QueryMode, ScalarValue};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 #[derive(Debug, thiserror::Error)]
@@ -29,7 +30,7 @@ pub enum CompileError {
     UnknownMember(String),
     #[error("cube '{0}' has no base table or sql")]
     NoSource(String),
-    #[error("filter on measure '{0}' is not supported")]
+    #[error("filter on measure '{0}' is not supported in row mode (no aggregates to compare)")]
     MeasureFilter(String),
     #[error("operator requires exactly one value: '{0}'")]
     NeedsOneValue(String),
@@ -47,6 +48,13 @@ pub enum CompileError {
          '{from}' rows and inflate every aggregate — declare the query on '{to}' instead"
     )]
     FanOut { from: String, to: String },
+    #[error("row mode takes no measures (got '{0}') — request dimensions only")]
+    RowsWithMeasures(String),
+    #[error(
+        "cube '{0}' declares no drill_members, so row mode is unavailable — the cube has not \
+         published a record shape"
+    )]
+    NoDrillMembers(String),
 }
 
 /// A compiled, parameterized statement ready for an engine to execute.
@@ -56,6 +64,10 @@ pub struct Compiled {
     pub params: Vec<ScalarValue>,
     pub columns: Vec<Column>,
 }
+
+/// Alias of the `include_total` window column. The engine strips it from
+/// rows/columns and surfaces it as `QueryResult.total`.
+pub const TOTAL_ALIAS: &str = "__total";
 
 fn split_member(member: &str) -> Result<(&str, &str), CompileError> {
     member
@@ -321,11 +333,59 @@ fn placeholder(idx: usize, dim_type: DimensionType) -> String {
     format!("${}{}", idx, cast_for(dim_type))
 }
 
+/// Normalize a `mode: rows` query: no measures, and the projection becomes
+/// the requested dimensions ∩ the base cube's `drill_members` (all of them
+/// when none are requested). `drill_members` is the cube's published record
+/// shape AND its PII boundary — row mode can never reveal more than it.
+fn normalize_rows_mode<'q>(
+    model: &Model,
+    query: &'q Query,
+) -> Result<Cow<'q, Query>, CompileError> {
+    if query.mode != QueryMode::Rows {
+        return Ok(Cow::Borrowed(query));
+    }
+    if let Some(m) = query.measures.first() {
+        return Err(CompileError::RowsWithMeasures(m.clone()));
+    }
+    let plan = plan_joins(model, query)?;
+    let base = plan.base;
+    if base.drill_members.is_empty() {
+        return Err(CompileError::NoDrillMembers(base.name.clone()));
+    }
+    // Qualify local drill-member keys; qualified entries pass through.
+    let allowed: Vec<String> = base
+        .drill_members
+        .iter()
+        .map(|m| {
+            if m.contains('.') { m.clone() } else { format!("{}.{}", base.name, m) }
+        })
+        .collect();
+    let dimensions: Vec<String> = if query.dimensions.is_empty() {
+        allowed
+    } else {
+        query
+            .dimensions
+            .iter()
+            .filter(|d| allowed.iter().any(|a| a == *d))
+            .cloned()
+            .collect()
+    };
+    if dimensions.is_empty() {
+        return Err(CompileError::Empty);
+    }
+    let mut normalized = query.clone();
+    normalized.dimensions = dimensions;
+    Ok(Cow::Owned(normalized))
+}
+
 pub fn compile(
     model: &Model,
     query: &Query,
     ctx: &SecurityContext,
 ) -> Result<Compiled, CompileError> {
+    let normalized = normalize_rows_mode(model, query)?;
+    let query: &Query = normalized.as_ref();
+    let is_rows = query.mode == QueryMode::Rows;
     let plan = plan_joins(model, query)?;
     let has_joins = plan.has_joins();
     let base = plan.base;
@@ -346,7 +406,9 @@ pub fn compile(
         let cube = plan.cube_for(member)?;
         let (expr, _) = dimension_expr(cube, field, has_joins)?;
         select.push(format!("{} as {}", expr, quote(member)));
-        group_by.push(expr);
+        if !is_rows {
+            group_by.push(expr);
+        }
         columns.push(Column { key: member.clone(), kind: "dimension".into() });
 
         if let Some(label) = cube.dimensions.get(field).and_then(|d| d.label.clone()) {
@@ -359,7 +421,9 @@ pub fn compile(
             let (label_expr, _) = dimension_expr(label_cube, label_field, has_joins)?;
             let alias = format!("{member}__label");
             select.push(format!("{} as {}", label_expr, quote(&alias)));
-            group_by.push(label_expr);
+            if !is_rows {
+                group_by.push(label_expr);
+            }
             columns.push(Column { key: alias, kind: "label".into() });
         }
     }
@@ -374,7 +438,9 @@ pub fn compile(
             None => format!("({})::text", expr),
         };
         select.push(format!("{} as {}", projected, quote(&td.dimension)));
-        group_by.push(projected);
+        if !is_rows {
+            group_by.push(projected);
+        }
         columns.push(Column { key: td.dimension.clone(), kind: "time".into() });
     }
 
@@ -390,10 +456,30 @@ pub fn compile(
         return Err(CompileError::Empty);
     }
 
-    // WHERE: user filters, then time-dimension ranges, then mandatory scope.
+    // The row total rides the same statement as one window column — on a
+    // grouped query it counts groups (what "1–25 of 312" means), and being
+    // a window it is computed before LIMIT/OFFSET, so it reflects the whole
+    // result set, not the page. The engine strips it into `total`.
+    if query.include_total {
+        select.push(format!("count(*) over () as {}", quote(TOTAL_ALIAS)));
+        columns.push(Column { key: TOTAL_ALIAS.into(), kind: "total".into() });
+    }
+
+    // WHERE: user dimension filters, then time-dimension ranges, then
+    // mandatory scope. Filters on MEASURES are collected for HAVING — they
+    // compile after everything else so their bind placeholders number last.
     let mut where_parts: Vec<String> = Vec::new();
+    let mut measure_filters: Vec<&Filter> = Vec::new();
     for f in &query.filters {
         let cube = plan.cube_for(&f.member)?;
+        let (_, field) = split_member(&f.member)?;
+        if cube.measures.contains_key(field) {
+            if is_rows {
+                return Err(CompileError::MeasureFilter(f.member.clone()));
+            }
+            measure_filters.push(f);
+            continue;
+        }
         where_parts.push(compile_filter(cube, has_joins, f, &mut params)?);
     }
     for td in &query.time_dimensions {
@@ -446,6 +532,16 @@ pub fn compile(
         where_parts.push(format!("{} = {}", expr, placeholder(params.len(), dt)));
     }
 
+    // HAVING: measure filters, compiled against the aggregate expression.
+    // This is what makes "the worst N" buildable. Compiled last so the bind
+    // placeholders follow the WHERE/scope parameters.
+    let mut having_parts: Vec<String> = Vec::new();
+    for f in measure_filters {
+        let (_, field) = split_member(&f.member)?;
+        let expr = measure_expr(base, field, has_joins)?;
+        having_parts.push(compile_predicate(&expr, DimensionType::Number, f, &mut params)?);
+    }
+
     // ORDER BY by alias (any selected member).
     let mut order_parts: Vec<String> = Vec::new();
     for o in &query.order {
@@ -479,11 +575,17 @@ pub fn compile(
     if !group_by.is_empty() {
         sql.push_str(&format!("\ngroup by {}", group_by.join(", ")));
     }
+    if !having_parts.is_empty() {
+        sql.push_str(&format!("\nhaving {}", having_parts.join(" and ")));
+    }
     if !order_parts.is_empty() {
         sql.push_str(&format!("\norder by {}", order_parts.join(", ")));
     }
     if let Some(limit) = query.limit {
         sql.push_str(&format!("\nlimit {limit}"));
+    }
+    if let Some(offset) = query.offset {
+        sql.push_str(&format!("\noffset {offset}"));
     }
 
     Ok(Compiled { sql, params, columns })
@@ -496,11 +598,18 @@ fn compile_filter(
     params: &mut Vec<ScalarValue>,
 ) -> Result<String, CompileError> {
     let (_, field) = split_member(&f.member)?;
-    if cube.measures.contains_key(field) {
-        return Err(CompileError::MeasureFilter(f.member.clone()));
-    }
     let (expr, dim_type) = dimension_expr(cube, field, has_joins)?;
+    compile_predicate(&expr, dim_type, f, params)
+}
 
+/// Compile one filter operator against an already-resolved SQL expression —
+/// shared by WHERE (dimension exprs) and HAVING (aggregate exprs).
+fn compile_predicate(
+    expr: &str,
+    dim_type: DimensionType,
+    f: &Filter,
+    params: &mut Vec<ScalarValue>,
+) -> Result<String, CompileError> {
     let one = |params: &mut Vec<ScalarValue>| -> Result<usize, CompileError> {
         let v = f
             .values
