@@ -10,11 +10,40 @@
 /** 1–4 column span in the report grid. */
 export type WidgetWidth = 1 | 2 | 3 | 4
 
+/** Why an active report date range did not reach a widget's query. */
+export type DateRangeSkipReason =
+  /** The cube declares no time field, so there is nothing to filter on. */
+  | 'no_time_field'
+  /** The widget opted out (`filters.ignore` or `filters.dateField: null`). */
+  | 'opted_out'
+  /** The widget's own query already pins a filter on the time member. */
+  | 'widget_pinned'
+  /** The host declared no capabilities for the query's cube. */
+  | 'unknown_cube'
+
+/**
+ * Which report-wide filters actually reached a widget's query — the receipt
+ * `applyFilters` hands back so nothing is ever skipped silently. A widget
+ * frame renders an "all time" marker from `dateRangeSkipped`.
+ */
+export interface AppliedFilters {
+  /** Facet keys pushed into the query as IN filters. */
+  facets: string[]
+  /** Member the report date range was applied on (e.g. `Orders.created_at`). */
+  dateRange?: string
+  /** Set when the report had an active date range this widget did not receive.
+   *  Absent when the range was applied — or no range was active at all. */
+  dateRangeSkipped?: DateRangeSkipReason
+}
+
 export interface WidgetBase {
   id?: string
   title?: string
   /** Grid width (of 4). Defaults to full width (4). */
   w?: WidgetWidth
+  /** Which report filters reached this widget's query (set by the resolver
+   *  on bound widgets; absent on static specs). */
+  applied?: AppliedFilters
 }
 
 export type ValueFormat = 'number' | 'percent' | 'currency' | 'text'
