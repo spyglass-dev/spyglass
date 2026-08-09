@@ -19,10 +19,47 @@ one serializable document the agent emits, the host stores, and the UI renders.
 | `table` | `columns` + `rows` |
 | `chart` | a `bar` / `line` / `area` / `progress` mark |
 | `note` | markdown narrative |
+| `pivot` | rows × columns × one measure, from a flat group-by result |
 | `custom` | a host-registered component (host defines the data format) |
 
 The package is dependency-light and inline-styled, so the same widgets render in
 the Studio and embed in any host app.
+
+### Pivot: a missing cell is not a zero
+
+The pivot is a **rendering**, not a query feature — the engine knows nothing
+about it. The same two-dimension group-by that feeds a table feeds a pivot:
+
+```json
+{
+  "type": "pivot",
+  "rows": ["Reviews.customer_id"],
+  "cols": ["Reviews.film_id"],
+  "measure": "Reviews.avg_rating",
+  "data": [ { "Reviews.customer_id": "c1", "Reviews.film_id": "f1", "Reviews.avg_rating": 4 } ],
+  "totals": { "row": "avg", "col": "avg" },
+  "scale": "sequential"
+}
+```
+
+- `rows` / `cols` — dimension members forming the axes; headers prefer the
+  `"{member}__label"` companion column when the data carries one (the engine's
+  label auto-projection produces it).
+- Cells distinguish **three states**: an *absent* combination renders `—`
+  (or `0` with `empty: "zero"`), a *present-but-null* measure renders `n/a`,
+  and a real `0` renders as `0`. Conflating these is how a matrix lies —
+  "never attempted" and "scored zero" are different facts.
+- `totals` adds edge aggregates (`avg`/`sum` per edge). They aggregate the
+  values that exist; absent cells join in only under `empty: "zero"`, null
+  never does.
+- `scale` opts into cell shading: `sequential` ramps min→max, `diverging`
+  splits around the midpoint. Off by default.
+- The pivot caps at **60 rows × 24 columns** and says how much it cut —
+  it truncates visibly, never silently.
+
+In the query-builder, choose *Pivot* with two group-bys and one measure:
+the first dimension becomes rows, the second columns. With fewer than two
+dimensions the draft degrades to a plain table.
 
 ## Report doc
 

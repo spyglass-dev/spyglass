@@ -114,12 +114,44 @@ export interface CustomSpec extends WidgetBase {
   props?: Record<string, unknown>
 }
 
+/** A pivot: rows × columns × one measure, rendered from an ordinary
+ *  two-dimension group-by result. The pivot is a RENDERING — the engine knows
+ *  nothing about it. The load-bearing rule: **a missing cell is not a zero.**
+ *  An absent combination, a present-but-null value, and a scored zero are
+ *  three different states and must look different — conflating them is the
+ *  classic way a gradebook lies. */
+export interface PivotSpec extends WidgetBase {
+  type: 'pivot'
+  /** Dimension member key(s) forming row headers (e.g. `["Scores.student_id"]`).
+   *  Header text prefers the `"{key}__label"` column when the data carries one. */
+  rows: string[]
+  /** Dimension member key(s) forming column headers. */
+  cols: string[]
+  /** The measure member filling cells. */
+  measure: string
+  /** Flat group-by rows: each carries the row/col dimension values (+ optional
+   *  `__label` companions) and the measure. */
+  data: Record<string, unknown>[]
+  /** Edge totals: `row` aggregates across a row (right edge), `col` down a
+   *  column (bottom edge). Absent = no totals. */
+  totals?: { row?: 'avg' | 'sum'; col?: 'avg' | 'sum' }
+  /** Cell shading (off by default). `sequential` ramps min→max; `diverging`
+   *  splits around the midpoint. */
+  scale?: 'none' | 'sequential' | 'diverging'
+  /** How an ABSENT combination renders: `dash` (default) or `zero`. A present
+   *  null still renders as `n/a` — that's a third state, not a rendering
+   *  option. */
+  empty?: 'dash' | 'zero'
+  format?: ValueFormat
+}
+
 export type WidgetSpec =
   | MetricSpec
   | TableSpec
   | ChartSpec
   | NoteSpec
   | CustomSpec
+  | PivotSpec
 
 /** A full report: ordered widgets laid out on the grid. */
 export interface ReportDoc {

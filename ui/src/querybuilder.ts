@@ -39,7 +39,7 @@ export interface WidgetQuery {
 /** A data widget being authored: the query + its visualization. Maps 1:1 to a
  *  host's "bound widget" (host adds its own `type: 'bound'` tag). */
 export interface WidgetDraft {
-  as: 'metric' | 'table' | 'chart'
+  as: 'metric' | 'table' | 'chart' | 'pivot'
   query: WidgetQuery
   title?: string
   label?: string
@@ -84,6 +84,26 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
       })),
       rows: result.rows,
     }
+  }
+  if (draft.as === 'pivot') {
+    // The pivot is a rendering of an ordinary two-dimension group-by:
+    // first dimension → rows, second → columns, first measure → cells.
+    // With fewer than 2 dimensions or no measure it degrades to a table.
+    const dims = draft.query.dimensions ?? []
+    const measure = draft.query.measures?.[0]
+    if (dims.length >= 2 && measure) {
+      return {
+        type: 'pivot',
+        title: draft.title,
+        w: 4,
+        rows: [dims[0]],
+        cols: [dims[1]],
+        measure,
+        data: result.rows,
+        format: draft.format,
+      }
+    }
+    return draftToWidgetSpec({ ...draft, as: 'table' }, result)
   }
   const x = draft.x ?? result.columns.find((c) => c.kind !== 'measure')?.key
   const y =
