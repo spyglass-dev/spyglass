@@ -162,6 +162,26 @@ export interface PivotSpec extends WidgetBase {
   format?: ValueFormat
 }
 
+/** A RESOLVED bound view: a host-registered component plus the data its
+ *  query produced. Unlike `custom` (frozen data), a view is live — the
+ *  resolver fills `data` from the query under the report's filters and drill
+ *  trail, and the component receives the drill callback (`ViewProps`). */
+export interface ViewSpec extends WidgetBase {
+  type: 'view'
+  /** View registry key (`ViewManifest.name`). */
+  component: string
+  /** Resolved query result (absent for a pure-props view). */
+  data?: {
+    rows: Record<string, unknown>[]
+    columns: { key: string; kind: string }[]
+    total?: number
+  }
+  props?: Record<string, unknown>
+  /** Set when the query failed or the manifest's contract was unmet — the
+   *  frame renders `widget_error`, never a blank cell. */
+  error?: { message: string; detail?: string }
+}
+
 export type WidgetSpec =
   | MetricSpec
   | TableSpec
@@ -169,6 +189,7 @@ export type WidgetSpec =
   | NoteSpec
   | CustomSpec
   | PivotSpec
+  | ViewSpec
 
 /** A full report: ordered widgets laid out on the grid. */
 export interface ReportDoc {

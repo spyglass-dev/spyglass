@@ -5,6 +5,7 @@
  * units ride along, joins and segments are one line each.
  */
 import type { CubeMeta, CubeModelMeta, DimensionMeta, MeasureMeta } from './querybuilder'
+import { viewsDigest, type ViewRegistry } from './views'
 
 const featuredFirst = <T extends { featured?: boolean; name: string }>(items: T[]): T[] =>
   [...items].sort((a, b) => Number(b.featured ?? false) - Number(a.featured ?? false))
@@ -58,8 +59,9 @@ function cubeBlock(cube: CubeMeta): string {
 }
 
 /** The digest: one markdown-ish string per model. Deterministic for a given
- *  `/meta` payload. */
-export function modelDigest(meta: CubeModelMeta): string {
+ *  `/meta` payload. Pass the host's view registry to include registered
+ *  views — the manifest is what lets an agent place a view by name. */
+export function modelDigest(meta: CubeModelMeta, views?: ViewRegistry): string {
   const header = [
     '# Data model',
     'Query shape: { measures: ["Cube.measure"], dimensions: ["Cube.dimension"],',
@@ -68,5 +70,7 @@ export function modelDigest(meta: CubeModelMeta): string {
     'Look before you build: run explore_data first to see the shape of an answer.',
     '',
   ].join('\n')
-  return header + meta.cubes.map(cubeBlock).join('\n\n')
+  const body = header + meta.cubes.map(cubeBlock).join('\n\n')
+  const viewsPart = views ? viewsDigest(views) : ''
+  return viewsPart ? `${body}\n\n${viewsPart}` : body
 }

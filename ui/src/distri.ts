@@ -5,9 +5,10 @@
  * `ReportHost` (open/update the report it's showing) and pairs these with a
  * reporting skill (see `spyglass/skills/reporting`).
  */
-import type { BoundWidget, Report, ReportWidget } from './report'
+import type { BoundWidget, Report, ReportWidget, ViewWidget } from './report'
 import type { CubeModelMeta, QueryResultLite, WidgetQuery } from './querybuilder'
 import { validateQuery } from './validate'
+import type { ViewRegistry } from './views'
 
 /** A frontend agent tool (matches `@distri/core` DistriFnTool structurally). */
 export interface AgentTool {
@@ -39,7 +40,7 @@ export const WIDGET_VOCAB = [
   'note — markdown: { type:"note", markdown, w? }',
 ].join('\n')
 
-const VALID = new Set(['metric', 'table', 'chart', 'note', 'bound'])
+const VALID = new Set(['metric', 'table', 'chart', 'note', 'bound', 'view'])
 const isWidget = (w: unknown): w is ReportWidget =>
   !!w && typeof w === 'object' && VALID.has((w as { type?: string }).type ?? '')
 const ok = (data: unknown) => [{ part_type: 'data' as const, data }]
@@ -50,26 +51,36 @@ const ok = (data: unknown) => [{ part_type: 'data' as const, data }]
 export interface ToolContext {
   meta?: CubeModelMeta
   runQuery?: (query: WidgetQuery) => Promise<QueryResultLite>
+  /** Host view registry — enables `add_report_view`, validated against each
+   *  view's manifest. */
+  views?: ViewRegistry
 }
 
-/** Validate every bound widget's query; the first failure aborts the tool. */
+const hasQuery = (w: ReportWidget): w is BoundWidget | (ViewWidget & { query: WidgetQuery }) => {
+  const t = (w as { type?: string }).type
+  return t === 'bound' || (t === 'view' && (w as ViewWidget).query !== undefined)
+}
+
+/** Validate every query-carrying widget; the first failure aborts the tool. */
 function validateWidgets(widgets: ReportWidget[], meta: CubeModelMeta | undefined) {
   if (!meta) return null
   for (const w of widgets) {
-    if ((w as BoundWidget).type !== 'bound') continue
-    const v = validateQuery((w as BoundWidget).query, meta)
+    if (!hasQuery(w)) continue
+    const v = validateQuery(w.query, meta)
     if (!v.ok) return { ok: false as const, error: v.error, suggestions: v.suggestions }
   }
   return null
 }
 
-/** Stamp agent provenance on bound widgets (part of the doc, not a side channel). */
+/** Stamp agent provenance on bound/view widgets (part of the doc, not a side
+ *  channel). */
 function withProvenance(widgets: ReportWidget[], prompt: string | undefined): ReportWidget[] {
-  return widgets.map((w) =>
-    (w as BoundWidget).type === 'bound' && !(w as BoundWidget).provenance
+  return widgets.map((w) => {
+    const t = (w as { type?: string }).type
+    return (t === 'bound' || t === 'view') && !(w as BoundWidget).provenance
       ? ({ ...w, provenance: { prompt, author: 'agent', at: Date.now() } } as ReportWidget)
-      : w,
-  )
+      : w
+  })
 }
 
 /** `create_report` — build a report from a title + widgets and open it. */
@@ -191,10 +202,85 @@ export function exploreDataTool(ctx: ToolContext): AgentTool {
   }
 }
 
-/** All generic report tools for a host. Pass `ctx` (meta + runner) to enable
- *  validation, provenance and `explore_data`. */
+/** `add_report_view` — place a registered host view, validated against its
+ *  manifest (unknown name or missing required members → repairable error). */
+export function addViewTool(host: ReportHost, ctx: ToolContext): AgentTool {
+  return {
+    type: 'function',
+    isExternal: true,
+    autoExecute: true,
+    name: 'add_report_view',
+    description:
+      'Add a registered HOST VIEW to the open report: { component, query?, props?, title?, index? }. Views are listed in the model digest with their data contracts. The view receives the report filters and participates in drill.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        component: { type: 'string', description: 'The view name from the digest.' },
+        query: { type: 'object' },
+        props: { type: 'object' },
+        title: { type: 'string' },
+        index: { type: 'number' },
+        prompt: { type: 'string', description: "The user's ask, verbatim (stored as provenance)." },
+      },
+      required: ['component'],
+    },
+    handler: async (input) => {
+      const a = (input ?? {}) as {
+        component?: string
+        query?: WidgetQuery
+        props?: Record<string, unknown>
+        title?: string
+        index?: number
+        prompt?: string
+      }
+      const manifest = a.component ? ctx.views?.[a.component] : undefined
+      if (!manifest) {
+        return ok({
+          ok: false,
+          error: `Unknown view \`${a.component ?? ''}\`.`,
+          suggestions: Object.keys(ctx.views ?? {}),
+        })
+      }
+      if (a.query && ctx.meta) {
+        const v = validateQuery(a.query, ctx.meta)
+        if (!v.ok) return ok(v)
+      }
+      // Pre-run contract check: every required member must be selected (the
+      // engine may add __label companions, so this is necessary, not exact).
+      const required = manifest.contract?.requires ?? []
+      const selected = new Set([...(a.query?.measures ?? []), ...(a.query?.dimensions ?? [])])
+      const missing = required.filter((m) => !selected.has(m))
+      if (missing.length) {
+        return ok({
+          ok: false,
+          error: `The \`${manifest.name}\` view requires ${missing.join(', ')} in its query.`,
+          suggestions: required,
+        })
+      }
+      const widget: ViewWidget = {
+        type: 'view',
+        component: manifest.name,
+        query: a.query,
+        props: a.props,
+        title: a.title,
+        provenance: { prompt: a.prompt, author: 'agent', at: Date.now() },
+      }
+      const current = host.getReport() ?? { title: 'Untitled report', widgets: [] }
+      const widgets = [...current.widgets]
+      const at = typeof a.index === 'number' ? Math.max(0, Math.min(a.index, widgets.length)) : widgets.length
+      widgets.splice(at, 0, widget)
+      host.setReport({ ...current, widgets })
+      return ok({ ok: true, widget_count: widgets.length })
+    },
+  }
+}
+
+/** All generic report tools for a host. Pass `ctx` (meta + runner + views) to
+ *  enable validation, provenance, `explore_data` and `add_report_view`. */
 export function buildReportTools(host: ReportHost, ctx: ToolContext = {}): AgentTool[] {
   const tools = [createReportTool(host, ctx), addWidgetTool(host, ctx)]
   if (ctx.runQuery) tools.push(exploreDataTool(ctx))
+  if (ctx.views && Object.keys(ctx.views).length) tools.push(addViewTool(host, ctx))
   return tools
 }

@@ -14,6 +14,7 @@ import { Widget } from './Widget'
 import { DataGrid, type GridQueryDelta } from './DataGrid'
 import { DrillBreadcrumb } from './DrillBreadcrumb'
 import { routeDrill, type DrillEvent, type DrillRouter } from '../drill'
+import type { ViewRegistry } from '../views'
 import { applyGridDelta, draftToWidgetSpec } from '../querybuilder'
 import { parseReportSearch, reportStateToSearch, type GridUrlState } from '../urlstate'
 import { FilterBar } from './FilterBar'
@@ -42,6 +43,8 @@ export interface ReportCanvasProps {
   cubeCaps?: CubeCapsMap
   /** Host widget renderers (merged with the built-in `widget_error`). */
   registry?: WidgetRegistry
+  /** Host view registry — bound views resolve and render through this. */
+  views?: ViewRegistry
   /** Facets for the filter bar; omit to hide filters. */
   facets?: FilterFacet[]
   humanizeError?: (detail: string) => string
@@ -85,6 +88,7 @@ export function ReportCanvas({
   runQuery,
   cubeCaps,
   registry,
+  views,
   facets,
   humanizeError,
   onAddWidget,
@@ -156,7 +160,7 @@ export function ReportCanvas({
     let cancelled = false
     setLoading(true)
     setError(null)
-    resolveReport(report, { runQuery, cubeCaps, filters, humanizeError })
+    resolveReport(report, { runQuery, cubeCaps, views, filters, humanizeError })
       .then((r) => !cancelled && setResolved(r))
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)))
       .finally(() => !cancelled && setLoading(false))
@@ -267,9 +271,12 @@ export function ReportCanvas({
                   <Widget
                     spec={spec}
                     registry={mergedRegistry}
+                    views={views}
+                    filters={filters}
                     onGridQuery={source?.type === 'bound' ? gridQueryAt(i) : undefined}
-                    onDrill={source?.type === 'bound' ? onDrill : undefined}
+                    onDrill={source?.type === 'bound' || source?.type === 'view' ? onDrill : undefined}
                     onMeasureClick={source?.type === 'bound' ? measureClickAt(i) : undefined}
+                    onRefresh={refresh}
                   />
                   <div className="absolute right-1 top-1 flex gap-1 opacity-0 transition-opacity group-hover/w:opacity-100">
                     {editable && (
