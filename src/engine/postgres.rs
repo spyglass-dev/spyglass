@@ -154,48 +154,11 @@ impl PostgresEngine {
             _ => (std::borrow::Cow::Borrowed(query), false),
         };
         let query: &Query = effective.as_ref();
-        let compiled = self.compile(model, query, ctx)?;
-
-        // Bind every param as TEXT (never string-interpolated). The compiler
-        // casts each placeholder to the column's type (`$n::numeric`,
-        // `$n::timestamptz`, …), so binding as text avoids tokio-postgres
-        // mis-inferring an `int4`/`timestamptz` column from an `i64`/`String`
-        // Rust value (which fails with "error serializing parameter").
-        let boxed: Vec<Box<dyn ToSql + Sync>> = compiled
-            .params
-            .iter()
-            .map(|v| -> Box<dyn ToSql + Sync> {
-                match v {
-                    ScalarValue::String(s) => Box::new(s.clone()),
-                    ScalarValue::Int(i) => Box::new(i.to_string()),
-                    ScalarValue::Float(f) => Box::new(f.to_string()),
-                    ScalarValue::Bool(b) => Box::new(b.to_string()),
-                    ScalarValue::Null => Box::new(Option::<String>::None),
-                }
-            })
-            .collect();
-        // Declare every parameter as TEXT so Postgres does not re-infer its
-        // type from the column; the compiler's `$n::numeric`/`$n::timestamptz`
-        // casts then coerce the text value to the column's type.
-        let typed: Vec<(&(dyn ToSql + Sync), Type)> = boxed
-            .iter()
-            .map(|b| (b.as_ref() as &(dyn ToSql + Sync), Type::TEXT))
-            .collect();
-
-        // RLS path: when configured AND the query carries a tenant scope value,
-        // run in a transaction that pins the GUC first so database policies
-        // enforce isolation. Non-tenant queries (no scope) and engines without
-        // RLS use the shared client directly.
-        let workspace = self
-            .rls
-            .as_ref()
-            .and_then(|_| ctx.scope.values().next())
-            .map(scalar_text);
-        let rows = match (&self.rls, workspace) {
-            (Some(rls), Some(ws)) => self.run_rls(rls, &compiled.sql, &typed, &ws).await?,
-            _ => self.client.query_typed(&compiled.sql, &typed).await?,
-        };
-        let mut json_rows: Vec<_> = rows.iter().map(row_to_json).collect();
+        // One clock per run: the current window and any comparison window
+        // resolve against the SAME instant.
+        let now = chrono::Utc::now();
+        let compiled = crate::compiler::compile_at(model, query, ctx, now)?;
+        let mut json_rows = self.fetch_json(&compiled.sql, &compiled.params, ctx).await?;
 
         // Pull the include_total window column out of the payload: it becomes
         // `total` on the result, never a visible column.
@@ -243,14 +206,92 @@ impl PostgresEngine {
             });
         }
 
-        Ok(QueryResult {
+        let mut result = QueryResult {
             columns,
             rows: json_rows,
             sql: Some(compiled.sql),
             total,
             has_more,
             truncated_at,
-        })
+        };
+
+        // Comparison window: run the SAME query over the shifted range and
+        // fold its measures in as `__prev_<measure>` columns. The compiler
+        // already validated the solo-time-grouping contract.
+        if let Some((idx, td)) = query
+            .time_dimensions
+            .iter()
+            .enumerate()
+            .find(|(_, td)| td.compare.is_some())
+        {
+            let kind = td.compare.expect("guarded by find");
+            let tz = crate::dates::parse_tz(query.timezone.as_deref())
+                .map_err(crate::compiler::CompileError::BadTimezone)?;
+            let range = td.date_range.as_ref().expect("compare validated to carry a range");
+            let (from, to) = crate::dates::resolve_date_range(range, now, tz)
+                .map_err(crate::compiler::CompileError::BadDateRange)?;
+            let (prev_from, prev_to) = crate::dates::shift_window(&from, &to, kind)
+                .map_err(crate::compiler::CompileError::BadDateRange)?;
+
+            let mut prev_query = query.clone();
+            prev_query.time_dimensions[idx].date_range =
+                Some(crate::query::DateRange::Absolute([prev_from, prev_to]));
+            prev_query.time_dimensions[idx].compare = None;
+            prev_query.include_total = false;
+            let prev_compiled = crate::compiler::compile_at(model, &prev_query, ctx, now)?;
+            let prev_rows = self.fetch_json(&prev_compiled.sql, &prev_compiled.params, ctx).await?;
+            let prev = QueryResult {
+                columns: Vec::new(),
+                rows: prev_rows,
+                sql: None,
+                total: None,
+                has_more: false,
+                truncated_at: None,
+            };
+            let time_key = td.granularity.is_some().then(|| td.dimension.clone());
+            crate::compare::merge_prev(&mut result, &prev, &query.measures, time_key.as_deref());
+        }
+
+        Ok(result)
+    }
+
+    /// Bind params as TEXT and execute — shared by the main run and the
+    /// comparison-window run. Binding as text avoids tokio-postgres
+    /// mis-inferring parameter types; the compiler's `$n::type` casts coerce
+    /// each value back to the column's type. Routes through the RLS
+    /// transaction when configured and the query carries a tenant scope.
+    async fn fetch_json(
+        &self,
+        sql: &str,
+        params: &[ScalarValue],
+        ctx: &SecurityContext,
+    ) -> Result<Vec<serde_json::Map<String, serde_json::Value>>, EngineError> {
+        let boxed: Vec<Box<dyn ToSql + Sync>> = params
+            .iter()
+            .map(|v| -> Box<dyn ToSql + Sync> {
+                match v {
+                    ScalarValue::String(s) => Box::new(s.clone()),
+                    ScalarValue::Int(i) => Box::new(i.to_string()),
+                    ScalarValue::Float(f) => Box::new(f.to_string()),
+                    ScalarValue::Bool(b) => Box::new(b.to_string()),
+                    ScalarValue::Null => Box::new(Option::<String>::None),
+                }
+            })
+            .collect();
+        let typed: Vec<(&(dyn ToSql + Sync), Type)> = boxed
+            .iter()
+            .map(|b| (b.as_ref() as &(dyn ToSql + Sync), Type::TEXT))
+            .collect();
+        let workspace = self
+            .rls
+            .as_ref()
+            .and_then(|_| ctx.scope.values().next())
+            .map(scalar_text);
+        let rows = match (&self.rls, workspace) {
+            (Some(rls), Some(ws)) => self.run_rls(rls, sql, &typed, &ws).await?,
+            _ => self.client.query_typed(sql, &typed).await?,
+        };
+        Ok(rows.iter().map(row_to_json).collect())
     }
 
     /// Execute one query under RLS: a fresh connection + transaction that pins

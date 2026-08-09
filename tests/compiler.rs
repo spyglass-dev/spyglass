@@ -131,6 +131,7 @@ fn time_dimension_truncates_and_ranges() {
             dimension: "Submissions.created_at".into(),
             granularity: Some(spyglass::Granularity::Day),
             date_range: Some(spyglass::query::DateRange::Absolute(["2026-01-01".into(), "2026-02-01".into()])),
+            ..Default::default()
         }],
         order: vec![Order { member: "Submissions.created_at".into(), desc: false }],
         ..Default::default()

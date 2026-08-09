@@ -33,8 +33,8 @@ fn q(range: DateRange, timezone: Option<&str>) -> Query {
         measures: vec!["Events.count".into()],
         time_dimensions: vec![TimeDimension {
             dimension: "Events.created_at".into(),
-            granularity: None,
             date_range: Some(range),
+            ..Default::default()
         }],
         timezone: timezone.map(str::to_string),
         ..Default::default()
