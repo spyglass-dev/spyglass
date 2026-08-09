@@ -53,7 +53,14 @@ struct AppState {
 
 #[derive(Deserialize)]
 struct QueryBody {
-    query: Query,
+    /// Single-query form (the original API).
+    #[serde(default)]
+    query: Option<Query>,
+    /// Batch form: run every query in one request over one connection — a
+    /// 12-widget report is one round trip instead of 12. Mutually exclusive
+    /// with `query`.
+    #[serde(default)]
+    queries: Option<Vec<Query>>,
     #[serde(default)]
     scope: BTreeMap<String, ScalarValue>,
 }
@@ -63,8 +70,68 @@ async fn query(state: web::Data<AppState>, body: web::Json<QueryBody>) -> impl R
         scope: body.scope.clone(),
         ..Default::default()
     };
-    match state.engine.run(&state.model, &body.query, &ctx).await {
-        Ok(result) => HttpResponse::Ok().json(result),
+    match (&body.query, &body.queries) {
+        (Some(q), None) => match state.engine.run(&state.model, q, &ctx).await {
+            Ok(result) => HttpResponse::Ok().json(result),
+            Err(e) => HttpResponse::BadRequest().json(serde_json::json!({ "error": e.to_string() })),
+        },
+        (None, Some(qs)) => {
+            // Per-item results: one bad widget must not blank the other 11.
+            // Each entry is either a QueryResult or { "error": … }.
+            let mut results: Vec<serde_json::Value> = Vec::with_capacity(qs.len());
+            for q in qs {
+                match state.engine.run(&state.model, q, &ctx).await {
+                    Ok(r) => results.push(serde_json::to_value(r).unwrap_or_default()),
+                    Err(e) => results.push(serde_json::json!({ "error": e.to_string() })),
+                }
+            }
+            HttpResponse::Ok().json(serde_json::json!({ "results": results }))
+        }
+        _ => HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "body must carry exactly one of `query` or `queries`"
+        })),
+    }
+}
+
+#[derive(Deserialize)]
+struct ValuesBody {
+    /// Qualified dimension (`Cube.member`) marked `filterable: true`.
+    member: String,
+    #[serde(default)]
+    search: Option<String>,
+    #[serde(default)]
+    limit: Option<u32>,
+    #[serde(default)]
+    scope: BTreeMap<String, ScalarValue>,
+}
+
+/// POST /values — scope-filtered, label-resolved distinct values of a
+/// `filterable` dimension, with counts. Powers facet option lists and
+/// typeahead.
+async fn values(state: web::Data<AppState>, body: web::Json<ValuesBody>) -> impl Responder {
+    let ctx = SecurityContext {
+        scope: body.scope.clone(),
+        ..Default::default()
+    };
+    match state
+        .engine
+        .values(&state.model, &body.member, body.search.as_deref(), body.limit, &ctx)
+        .await
+    {
+        Ok(result) => {
+            let values: Vec<serde_json::Value> = result
+                .rows
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "value": r.get("value"),
+                        "label": r.get("label"),
+                        "count": r.get("count"),
+                    })
+                })
+                .collect();
+            HttpResponse::Ok().json(serde_json::json!({ "values": values }))
+        }
         Err(e) => HttpResponse::BadRequest().json(serde_json::json!({ "error": e.to_string() })),
     }
 }
@@ -351,6 +418,16 @@ async fn serve() -> std::io::Result<()> {
         _ => engine,
     };
 
+    // Optional short-TTL result cache; the key includes the tenant scope, so
+    // a hit can never cross tenants. Relative windows roll over naturally.
+    let engine = match std::env::var("SPYGLASS_CACHE_TTL_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()) {
+        Some(ms) if ms > 0 => {
+            eprintln!("result cache: {ms}ms TTL (SPYGLASS_CACHE_TTL_MS)");
+            engine.with_cache(std::time::Duration::from_millis(ms))
+        }
+        _ => engine,
+    };
+
     let reports_dir = std::env::var("REPORTING_REPORTS").unwrap_or_else(|_| "./reports".to_string());
     eprintln!("reports dir: {reports_dir}");
 
@@ -374,6 +451,7 @@ async fn serve() -> std::io::Result<()> {
             .route("/schema", web::get().to(schema))
             .route("/analyze", web::post().to(analyze))
             .route("/query", web::post().to(query))
+            .route("/values", web::post().to(values))
             .route("/reports", web::get().to(reports_list))
             .route("/reports", web::post().to(report_save))
             .route("/reports/{id}", web::get().to(report_get))
