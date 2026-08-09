@@ -340,6 +340,17 @@ async fn serve() -> std::io::Result<()> {
         _ => engine,
     };
 
+    // Optional row cap: `SPYGLASS_MAX_ROWS` clamps every query's limit; a
+    // result that fills the cap is marked `truncated_at` in the response
+    // instead of silently looking complete.
+    let engine = match std::env::var("SPYGLASS_MAX_ROWS").ok().and_then(|v| v.trim().parse::<u32>().ok()) {
+        Some(max) if max > 0 => {
+            eprintln!("row cap: {max} rows per query (SPYGLASS_MAX_ROWS)");
+            engine.with_max_rows(max)
+        }
+        _ => engine,
+    };
+
     let reports_dir = std::env::var("REPORTING_REPORTS").unwrap_or_else(|_| "./reports".to_string());
     eprintln!("reports dir: {reports_dir}");
 

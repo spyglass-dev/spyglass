@@ -23,6 +23,10 @@ pub struct PostgresEngine {
     /// defense-in-depth layer beneath the compiler's mandatory scope filters.
     rls: Option<RlsConfig>,
     exporter: Option<Arc<dyn QueryExporter>>,
+    /// When set, an unbounded (or larger) `limit` is clamped to this many
+    /// rows, and a result that hits the cap is marked `truncated_at` — so a
+    /// UI can tell a truncated table from a complete one.
+    max_rows: Option<u32>,
 }
 
 /// Config for the row-level-security execution path.
@@ -39,12 +43,21 @@ impl PostgresEngine {
     /// Wrap an existing client (e.g. one the host already manages). No RLS path
     /// — the embedder owns connection management and applies its own scope.
     pub fn new(client: Client) -> Self {
-        Self { client, conn_str: None, rls: None, exporter: None }
+        Self { client, conn_str: None, rls: None, exporter: None, max_rows: None }
     }
 
     /// Attach a query-log exporter — every executed query is recorded.
     pub fn with_exporter(mut self, exporter: Arc<dyn QueryExporter>) -> Self {
         self.exporter = Some(exporter);
+        self
+    }
+
+    /// Cap every query at `max` rows. Replaces ad hoc host-side clamps: the
+    /// clamp is applied to the compiled limit, and a result that fills the
+    /// cap is reported via `QueryResult.truncated_at` instead of silently
+    /// looking complete.
+    pub fn with_max_rows(mut self, max: u32) -> Self {
+        self.max_rows = Some(max);
         self
     }
 
@@ -90,6 +103,7 @@ impl PostgresEngine {
             conn_str: Some(conn_str.to_string()),
             rls: None,
             exporter: None,
+            max_rows: None,
         })
     }
 
@@ -126,6 +140,20 @@ impl PostgresEngine {
         ctx: &SecurityContext,
     ) -> Result<QueryResult, EngineError> {
         let started = Instant::now();
+
+        // Row cap: clamp an unbounded (or larger) limit BEFORE compiling so
+        // the cap happens in SQL, and remember that we did — a result that
+        // then fills the cap is reported as truncated, never silently
+        // complete-looking.
+        let (effective, clamped): (std::borrow::Cow<Query>, bool) = match self.max_rows {
+            Some(max) if query.limit.is_none_or(|l| l > max) => {
+                let mut q = query.clone();
+                q.limit = Some(max);
+                (std::borrow::Cow::Owned(q), true)
+            }
+            _ => (std::borrow::Cow::Borrowed(query), false),
+        };
+        let query: &Query = effective.as_ref();
         let compiled = self.compile(model, query, ctx)?;
 
         // Bind every param as TEXT (never string-interpolated). The compiler
@@ -167,7 +195,33 @@ impl PostgresEngine {
             (Some(rls), Some(ws)) => self.run_rls(rls, &compiled.sql, &typed, &ws).await?,
             _ => self.client.query_typed(&compiled.sql, &typed).await?,
         };
-        let json_rows: Vec<_> = rows.iter().map(|r| row_to_json(r)).collect();
+        let mut json_rows: Vec<_> = rows.iter().map(row_to_json).collect();
+
+        // Pull the include_total window column out of the payload: it becomes
+        // `total` on the result, never a visible column.
+        use crate::compiler::TOTAL_ALIAS;
+        let mut total = None;
+        let mut columns = compiled.columns;
+        if query.include_total {
+            total = Some(
+                json_rows
+                    .first()
+                    .and_then(|r| r.get(TOTAL_ALIAS))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+            );
+            for r in &mut json_rows {
+                r.remove(TOTAL_ALIAS);
+            }
+            columns.retain(|c| c.key != TOTAL_ALIAS);
+        }
+        let has_more = total
+            .map(|t| (query.offset.unwrap_or(0) as u64 + json_rows.len() as u64) < t)
+            .unwrap_or(false);
+        let truncated_at = match (clamped, self.max_rows) {
+            (true, Some(max)) if json_rows.len() as u32 == max => Some(max),
+            _ => None,
+        };
 
         if let Some(exporter) = &self.exporter {
             let cube = query
@@ -190,9 +244,12 @@ impl PostgresEngine {
         }
 
         Ok(QueryResult {
-            columns: compiled.columns,
+            columns,
             rows: json_rows,
             sql: Some(compiled.sql),
+            total,
+            has_more,
+            truncated_at,
         })
     }
 
