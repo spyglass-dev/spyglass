@@ -14,6 +14,7 @@
  */
 import { useRef, useState, type CSSProperties } from 'react'
 import { formatValue, type TableSpec, type ValueFormat } from '../types'
+import type { DrillEvent } from '../drill'
 import { tokens } from '../tokens'
 
 /** A patch the grid asks the host to apply to the widget's query. */
@@ -119,11 +120,19 @@ const stickyFirst: CSSProperties = { position: 'sticky', left: 0, background: to
 export function DataGrid({
   spec,
   onQuery,
+  onDrill,
+  onMeasureClick,
 }: {
   spec: TableSpec
   /** Present = server-driven: header clicks and the pager emit query deltas.
    *  Absent = static data; no sort affordances, no pager. */
   onQuery?: (delta: GridQueryDelta) => void
+  /** Present = dimension cells are drill targets: clicking one emits a
+   *  `DrillEvent` (member, value, resolved label, drill entity). */
+  onDrill?: (event: DrillEvent) => void
+  /** Present = measure cells open row mode (the records drawer) — clicking
+   *  one hands back the row and the measure's column key. */
+  onMeasureClick?: (row: Record<string, unknown>, columnKey: string) => void
 }) {
   const cols = visibleColumns(spec)
   const offset = spec.page?.offset ?? 0
@@ -215,16 +224,37 @@ export function DataGrid({
                   const raw = cellValue(row, c.key)
                   const barValue =
                     spec.bars === c.key && typeof row[c.key] === 'number' ? (row[c.key] as number) : undefined
+                  // Dimensions drill; measures open row mode. Both are
+                  // derived from the column kind — never authored per report.
+                  const drills = onDrill && c.kind === 'dimension'
+                  const opensRows = onMeasureClick && c.kind === 'measure'
+                  const click = drills
+                    ? () =>
+                        onDrill({
+                          member: c.key,
+                          value: (row[c.key] ?? null) as DrillEvent['value'],
+                          label: row[`${c.key}__label`] != null ? String(row[`${c.key}__label`]) : undefined,
+                          entity: c.drillEntity,
+                        })
+                    : opensRows
+                      ? () => onMeasureClick(row, c.key)
+                      : undefined
                   return (
                     <td
                       key={c.key}
+                      onClick={click}
+                      role={click ? 'button' : undefined}
                       style={{
                         padding: '8px 12px',
                         textAlign: c.align ?? 'left',
-                        color: tokens.text,
+                        color: drills ? tokens.accent : tokens.text,
                         whiteSpace: 'nowrap',
                         height: virtual ? ROW_HEIGHT : undefined,
                         boxSizing: virtual ? 'border-box' : undefined,
+                        ...(click ? { cursor: 'pointer' } : {}),
+                        ...(drills
+                          ? { textDecoration: 'underline', textDecorationColor: tokens.accentSoft, textUnderlineOffset: 3 }
+                          : {}),
                         ...(ci === 0 ? stickyFirst : {}),
                         ...(barValue !== undefined && barMax > 0
                           ? {
