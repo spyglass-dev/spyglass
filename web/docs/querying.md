@@ -107,6 +107,30 @@ tenant flag, and no SQL:
 reports cubes/measures/dimensions — for CI or an agent self-checking generated
 cubes.
 
+## Relative date ranges
+
+`timeDimensions[].dateRange` accepts an absolute `[from, to)` pair **or** a
+relative expression, resolved server-side each time the query runs — so a
+saved document stores the *intent* and the window moves:
+
+```json
+{ "measures": ["Orders.count"],
+  "timeDimensions": [{ "dimension": "Orders.created_at", "dateRange": "last 30 days" }],
+  "timezone": "Europe/London" }
+```
+
+Grammar: `today` · `yesterday` · `ytd` · `last N days|weeks|months|quarters|years`
+(the current period plus the N−1 before it, so `last 30 days` includes today)
+· `this week|month|quarter|year` · `previous <unit>` (`last <unit>` with no
+number means the same). Periods are calendar-aligned in the query's
+`timezone` (IANA name, default UTC); weeks start on Monday (ISO). An
+unrecognized expression is a typed compile error listing the accepted forms.
+
+Resolution is clock-injected: the compiler never reads system time
+(`compile_at(model, query, ctx, now)`; the engine passes the real clock, and
+the clockless `compile()` refuses relative ranges outright), so the same
+document at the same instant always compiles to the same SQL.
+
 ## Pagination and totals
 
 `limit`, `offset`, and `includeTotal` page a query server-side:

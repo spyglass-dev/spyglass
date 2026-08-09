@@ -36,6 +36,10 @@ pub struct Query {
     /// records, projecting only the cube's published `drill_members`.
     #[serde(default, skip_serializing_if = "is_default_mode")]
     pub mode: QueryMode,
+    /// IANA timezone (e.g. `Europe/London`) relative date expressions are
+    /// evaluated in. Defaults to UTC.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
 }
 
 /// How a query reads the cube: aggregated (the default) or row-level.
@@ -96,9 +100,22 @@ pub struct TimeDimension {
     pub dimension: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub granularity: Option<Granularity>,
-    /// `[from, to]` ISO timestamps (inclusive lower, exclusive upper).
+    /// Either `[from, to]` ISO timestamps (inclusive lower, exclusive upper)
+    /// or a relative expression (`"last 30 days"`, `"this month"`,
+    /// `"previous quarter"`, `"ytd"`) resolved server-side against an
+    /// injected clock in the query's `timezone` — so a saved document stores
+    /// the *intent* and the window moves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub date_range: Option<[String; 2]>,
+    pub date_range: Option<DateRange>,
+}
+
+/// An absolute `[from, to)` pair, or a relative expression the server
+/// resolves at run time.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DateRange {
+    Absolute([String; 2]),
+    Relative(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

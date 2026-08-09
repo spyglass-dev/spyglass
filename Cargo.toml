@@ -25,6 +25,10 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
 thiserror = "2.0"
+# Relative-date resolution ("last 30 days", "this month") against an injected
+# clock — the compiler itself never reads the system time.
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+chrono-tz = "0.10"
 tokio-postgres = { version = "0.7", optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
 actix-web = { version = "4.9", optional = true }

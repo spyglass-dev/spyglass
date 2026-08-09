@@ -5,7 +5,7 @@
 //! is the default feature; future engines (DuckDB, BigQuery, …) plug in here
 //! behind their own flags without changing the model, query, or UI.
 
-use crate::compiler::{compile, CompileError, Compiled};
+use crate::compiler::{CompileError, Compiled};
 use crate::context::SecurityContext;
 use crate::model::Model;
 use crate::query::Query;
@@ -27,13 +27,15 @@ pub trait Engine {
     /// Engine identifier (`postgres`, …) — surfaced in diagnostics.
     fn name(&self) -> &'static str;
 
-    /// Compile a query against the model + scope into a statement.
+    /// Compile a query against the model + scope into a statement. Engines
+    /// inject the real clock here — relative date ranges resolve against it,
+    /// while the compiler itself never reads system time.
     fn compile(
         &self,
         model: &Model,
         query: &Query,
         ctx: &SecurityContext,
     ) -> Result<Compiled, CompileError> {
-        compile(model, query, ctx)
+        crate::compiler::compile_at(model, query, ctx, chrono::Utc::now())
     }
 }
