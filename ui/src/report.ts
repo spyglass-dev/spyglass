@@ -24,6 +24,7 @@ import {
 } from './querybuilder'
 import { resolveDateRange, hasActiveFilters, type FilterFacet, type ReportFilters } from './filters'
 import { applyDrillTrail, type DrillTrail } from './drill'
+import { checkViewContract, type ViewRegistry } from './views'
 
 // ── Filter spec (declared filters) ───────────────────────────────────────────
 
@@ -82,7 +83,21 @@ export interface BoundWidget extends WidgetDraft {
   provenance?: Provenance
 }
 
-export type ReportWidget = WidgetSpec | BoundWidget
+/** A view widget as AUTHORED: a registered host component + optional query.
+ *  Resolution runs the query under the report's filters + drill trail and
+ *  checks the manifest's contract; the result is a data-bearing `ViewSpec`. */
+export interface ViewWidget {
+  type: 'view'
+  component: string
+  query?: WidgetQuery
+  props?: Record<string, unknown>
+  title?: string
+  w?: WidgetWidth
+  filters?: WidgetFilterBinding
+  provenance?: Provenance
+}
+
+export type ReportWidget = WidgetSpec | BoundWidget | ViewWidget
 
 export interface Report {
   title: string
@@ -196,11 +211,14 @@ export interface ResolveOptions {
   drill?: DrillTrail
   /** Cube capabilities for filter application (none = no report filters). */
   cubeCaps?: CubeCapsMap
+  /** Host view registry — required to resolve `view` widgets. */
+  views?: ViewRegistry
   /** Map a raw error to a friendly one-liner for the error widget. */
   humanizeError?: (detail: string) => string
 }
 
 const isBound = (w: ReportWidget): w is BoundWidget => (w as BoundWidget).type === 'bound'
+const isView = (w: ReportWidget): w is ViewWidget => (w as ViewWidget).type === 'view'
 
 /** Resolve one bound widget into a data-bearing spec (honoring filters). The
  *  spec carries `applied` — which report filters reached the query — so a
@@ -219,6 +237,38 @@ export async function resolveBound(
   return widget.w ? { ...spec, w: widget.w } : spec
 }
 
+/** Resolve one view widget: run its query under the report's filters + drill
+ *  trail, check the manifest's contract, and hand back a data-bearing
+ *  `ViewSpec`. An unknown component or an unmet contract sets `error` — the
+ *  frame renders `widget_error`, never a blank cell. */
+export async function resolveView(widget: ViewWidget, opts: ResolveOptions): Promise<WidgetSpec> {
+  const base: WidgetSpec = {
+    type: 'view',
+    component: widget.component,
+    title: widget.title,
+    w: widget.w,
+    props: widget.props,
+  }
+  const manifest = opts.views?.[widget.component]
+  if (!manifest) {
+    return { ...base, error: { message: `Unknown view \`${widget.component}\` — is it registered?` } }
+  }
+  if (!widget.query) {
+    const contractError = checkViewContract(manifest, { columns: [] })
+    return contractError ? { ...base, error: { message: contractError } } : base
+  }
+  const bound: BoundWidget = { type: 'bound', as: 'table', query: widget.query, filters: widget.filters }
+  const { query, applied } = applyFilters(bound, opts.filters, opts.cubeCaps ?? {})
+  const cube = queryCube(query)
+  const drilled = opts.drill?.length
+    ? applyDrillTrail(query, opts.drill, cube, cube ? opts.cubeCaps?.[cube]?.dims : undefined)
+    : query
+  const result = await opts.runQuery(drilled)
+  const contractError = checkViewContract(manifest, result)
+  if (contractError) return { ...base, applied, error: { message: contractError } }
+  return { ...base, applied, data: { rows: result.rows, columns: result.columns, total: result.total } }
+}
+
 /** Resolve a whole report into a renderable `ReportDoc`. A widget whose query
  *  fails degrades to a `widget_error` custom spec so one bad query can't blank
  *  the report (render it with a host `widget_error` renderer). */
@@ -227,6 +277,21 @@ export async function resolveReport(report: Report, opts: ResolveOptions): Promi
   const drill = opts.drill ?? report.drill
   const widgets = await Promise.all(
     report.widgets.map(async (w): Promise<WidgetSpec> => {
+      if (isView(w)) {
+        try {
+          return await resolveView(w, { ...opts, filters, drill })
+        } catch (e) {
+          const detail = e instanceof Error ? e.message : String(e)
+          return {
+            type: 'view',
+            component: w.component,
+            title: w.title,
+            w: w.w,
+            props: w.props,
+            error: { message: opts.humanizeError?.(detail) ?? "Couldn't load this view's data.", detail },
+          }
+        }
+      }
       if (!isBound(w)) return w
       try {
         return await resolveBound(w, { ...opts, filters, drill })

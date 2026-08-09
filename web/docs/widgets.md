@@ -20,7 +20,8 @@ one serializable document the agent emits, the host stores, and the UI renders.
 | `chart` | a `bar` / `line` / `area` / `progress` mark |
 | `note` | markdown narrative |
 | `pivot` | rows × columns × one measure, from a flat group-by result |
-| `custom` | a host-registered component (host defines the data format) |
+| `custom` | a host-registered component with frozen data |
+| `view` | a host-registered component **bound to a query** — live, filtered, drillable |
 
 The package is dependency-light and inline-styled, so the same widgets render in
 the Studio and embed in any host app.
@@ -173,6 +174,32 @@ ignores the report's date range *looks* identical to one that honors it.
 `resolveReport`/`resolveBound` attach `applied` to every resolved widget spec,
 so a widget frame can render an explicit "all time" marker for any widget the
 range could not reach, instead of presenting mixed windows as one report.
+
+## Bound views: live product widgets, not an escape hatch
+
+A `custom` widget carries frozen data. A **view** is a host React component
+**bound to a query**, resolved by Spyglass like any bound widget:
+
+```json
+{ "type": "view", "component": "leaderboard",
+  "query": { "measures": ["Payments.revenue"], "dimensions": ["Payments.rating"] },
+  "props": { "measure": "Payments.revenue" } }
+```
+
+- `registerView(registry, manifest)` — the manifest carries `name`, `title`,
+  `description`, a **data contract** (`requires` / `suggests` member keys), a
+  `propsSchema`, and the component. The manifest is what puts a view in the
+  model digest (`modelDigest(meta, views)`) and lets an agent place it by
+  name (`add_report_view`, validated against the manifest).
+- The component receives **`ViewProps`**: the resolved `rows`/`columns`/`total`,
+  the report `filters` in effect, the **`drill` callback** (views participate
+  in drill like every table), `refresh`, and its own `props`. Views respect
+  report scope and the drill trail — they are part of the system, not an
+  escape hatch from it.
+- **An unmet contract renders `widget_error`, never a blank cell** — same for
+  an unknown component name.
+- An *action widget* (a view with a mutation) is just a view whose component
+  calls host APIs and then `refresh()`.
 
 ## Explore: text and chips edit one object
 
