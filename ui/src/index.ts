@@ -18,6 +18,16 @@ export { Metric } from './components/Metric'
 export { DataTable } from './components/DataTable'
 export { Chart } from './components/Chart'
 export { Note } from './components/Note'
+export {
+  Pivot,
+  buildPivot,
+  cellShade,
+  MAX_PIVOT_ROWS,
+  MAX_PIVOT_COLS,
+  type BuiltPivot,
+  type PivotCell,
+  type PivotAxisItem,
+} from './components/Pivot'
 export { FilterBar, type FacetRenderer } from './components/FilterBar'
 export { DateRangePicker } from './components/DateRangePicker'
 export { QueryBuilder } from './components/QueryBuilder'
