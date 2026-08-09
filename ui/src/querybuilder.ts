@@ -34,6 +34,10 @@ export interface WidgetQuery {
   timeDimensions?: { dimension: string; granularity?: string; dateRange?: [string, string] }[]
   order?: { member: string; desc?: boolean }[]
   limit?: number
+  /** Rows to skip — server-driven paging (engine `offset`). */
+  offset?: number
+  /** Ask the engine for the total row/group count (`QueryResult.total`). */
+  includeTotal?: boolean
 }
 
 /** A data widget being authored: the query + its visualization. Maps 1:1 to a
@@ -53,6 +57,31 @@ export interface WidgetDraft {
 export interface QueryResultLite {
   columns: { key: string; kind: string }[]
   rows: Record<string, unknown>[]
+  /** Total matching rows/groups (present when the query asked `includeTotal`). */
+  total?: number
+  has_more?: boolean
+  /** Set when the engine's row cap clamped the result. */
+  truncated_at?: number
+}
+
+/** Merge a DataGrid sort/paging delta into a widget's query — the "sort and
+ *  paging write query deltas, not array operations" contract. An empty
+ *  `order` array clears the sort back to the query default. */
+export function applyGridDelta(
+  query: WidgetQuery,
+  delta: { order?: { member: string; desc?: boolean }[]; offset?: number; limit?: number },
+): WidgetQuery {
+  const next = { ...query }
+  if (delta.order !== undefined) {
+    if (delta.order.length === 0) delete next.order
+    else next.order = delta.order
+  }
+  if (delta.offset !== undefined) {
+    if (delta.offset === 0) delete next.offset
+    else next.offset = delta.offset
+  }
+  if (delta.limit !== undefined) next.limit = delta.limit
+  return next
 }
 
 const short = (member: string) => member.split('.').pop() ?? member
@@ -73,6 +102,7 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
     }
   }
   if (draft.as === 'table') {
+    const order = draft.query.order?.[0]
     return {
       type: 'table',
       title: draft.title,
@@ -83,6 +113,13 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
         align: c.kind === 'measure' ? 'right' : 'left',
       })),
       rows: result.rows,
+      total: result.total,
+      truncatedAt: result.truncated_at,
+      page:
+        draft.query.offset !== undefined || draft.query.limit !== undefined
+          ? { offset: draft.query.offset ?? 0, limit: draft.query.limit }
+          : undefined,
+      sort: order ? { key: order.member, desc: order.desc ?? false } : undefined,
     }
   }
   if (draft.as === 'pivot') {

@@ -11,6 +11,7 @@
 import { lazy, Suspense, useMemo } from 'react'
 import type { VegaEmbedProps } from 'react-vega'
 import { type ChartSpec, type ValueFormat } from '../types'
+import { tokens } from '../tokens'
 
 // Lazy-load react-vega (and Vega) so the heavy renderer is only fetched when a
 // chart actually renders — keeps it out of the host's initial bundle. react-vega
@@ -128,7 +129,7 @@ export function Chart({ spec }: { spec: ChartSpec }) {
   )
 
   if (series.length === 0 && !vlSpec) {
-    return <div style={{ color: '#9ca3af', fontSize: 13 }}>No data.</div>
+    return <div style={{ color: tokens.textFaint, fontSize: 13 }}>No data.</div>
   }
 
   if (rawSpec) {
@@ -156,7 +157,7 @@ export function Chart({ spec }: { spec: ChartSpec }) {
               <div style={{ height: 8, borderRadius: 999, background: '#eef2f7', overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${pct}%`, background: 'var(--rpt-primary, #6366f1)' }} />
               </div>
-              <span style={{ fontSize: 12, color: '#6b7280', width: 44, textAlign: 'right' }}>{Math.round(values[i])}</span>
+              <span style={{ fontSize: 12, color: tokens.textMuted, width: 44, textAlign: 'right' }}>{Math.round(values[i])}</span>
             </div>
           )
         })}

@@ -5,6 +5,7 @@
  */
 import type { CSSProperties } from 'react'
 import type { ReportDoc, WidgetSpec } from '../types'
+import { tokens } from '../tokens'
 import type { WidgetRegistry } from '../registry'
 import { Widget } from './Widget'
 
@@ -32,7 +33,7 @@ export function ReportView({
         <header>
           {doc.title && <h1 style={{ fontSize: 26, fontWeight: 800, margin: 0 }}>{doc.title}</h1>}
           {doc.description && (
-            <p style={{ marginTop: 6, color: '#6b7280', fontSize: 14 }}>{doc.description}</p>
+            <p style={{ marginTop: 6, color: tokens.textMuted, fontSize: 14 }}>{doc.description}</p>
           )}
         </header>
       )}
@@ -40,7 +41,7 @@ export function ReportView({
         {doc.widgets.map((spec: WidgetSpec, i) => (
           <section key={spec.id ?? i} style={span(spec.w)}>
             {spec.title && spec.type !== 'metric' && (
-              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#6b7280', marginBottom: 6 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: tokens.textMuted, marginBottom: 6 }}>
                 {spec.title}
               </div>
             )}

@@ -67,6 +67,18 @@ export interface TableSpec extends WidgetBase {
   type: 'table'
   columns: TableColumn[]
   rows: Record<string, unknown>[]
+  /** Total matching rows/groups across ALL pages (from the engine's
+   *  `include_total`) — what makes "1–25 of 312" possible. */
+  total?: number
+  /** Set when the engine's row cap clamped the result — the table is a
+   *  truncated view, and says so. */
+  truncatedAt?: number
+  /** The page this data represents (the query's offset/limit). */
+  page?: { offset: number; limit?: number }
+  /** Current sort, mirrored from the query's `order` (renders the caret). */
+  sort?: { key: string; desc: boolean }
+  /** Render proportional in-cell bars for this column key (a measure). */
+  bars?: string
 }
 
 export type ChartMark = 'bar' | 'line' | 'area' | 'point' | 'progress'
