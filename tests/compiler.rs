@@ -10,35 +10,33 @@ fn submissions_model() -> Model {
     let mut dimensions = BTreeMap::new();
     dimensions.insert(
         "status".to_string(),
-        Dimension { dimension_type: DimensionType::String, sql: Some("status".into()), title: None, tenant: false },
+        Dimension { dimension_type: DimensionType::String, sql: Some("status".into()), ..Default::default() },
     );
     dimensions.insert(
         "workspace_id".to_string(),
-        Dimension { dimension_type: DimensionType::String, sql: Some("workspace_id".into()), title: None, tenant: true },
+        Dimension { dimension_type: DimensionType::String, sql: Some("workspace_id".into()), tenant: true, ..Default::default() },
     );
     dimensions.insert(
         "created_at".to_string(),
-        Dimension { dimension_type: DimensionType::Time, sql: Some("created_at".into()), title: None, tenant: false },
+        Dimension { dimension_type: DimensionType::Time, sql: Some("created_at".into()), ..Default::default() },
     );
 
     let mut measures = BTreeMap::new();
     measures.insert(
         "count".to_string(),
-        Measure { measure_type: MeasureType::Count, sql: None, title: None, format: None },
+        Measure { measure_type: MeasureType::Count, ..Default::default() },
     );
     measures.insert(
         "avg_score".to_string(),
-        Measure { measure_type: MeasureType::Avg, sql: Some("score_pct".into()), title: None, format: Some("percent".into()) },
+        Measure { measure_type: MeasureType::Avg, sql: Some("score_pct".into()), format: Some("percent".into()), ..Default::default() },
     );
 
     let cube = Cube {
         name: "Submissions".into(),
         sql_table: Some("activity_submissions".into()),
-        sql: None,
-        title: None,
-        description: None,
         measures,
         dimensions,
+        ..Default::default()
     };
     let mut cubes = BTreeMap::new();
     cubes.insert("Submissions".into(), cube);

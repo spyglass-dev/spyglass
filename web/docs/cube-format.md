@@ -77,6 +77,56 @@ names, and timestamps.
 Use `type: time` for `*_at` timestamp columns — those become available for time
 dimensions with granularities (`day`, `week`, `month`, …).
 
+Two presentation annotations ride on dimensions:
+
+| Field | Meaning |
+|-------|---------|
+| `label` | member whose value is **displayed** for this dimension — typically a joined cube's name column for an id (`label: Customers.customer_name`), or an unqualified same-cube dimension |
+| `drill: { entity }` | what a click on this value **means** — the entity it identifies (`customer`, `order`, …). The UI emits a typed `DrillEvent` carrying it |
+
+A labelled dimension is auto-projected: selecting it adds a
+`"{member}__label"` column (kind `label`) to the result, joining the label's
+cube if needed. Sorting, filtering and grouping still act on the **id** — the
+label is presentation only.
+
+## Joins
+
+A cube may declare joins to other cubes:
+
+```yaml
+Orders:
+  sql_table: orders
+  joins:
+    Customers: { relationship: many_to_one, sql: "${CUBE}.customer_id = ${Customers}.id" }
+```
+
+- `relationship` is `many_to_one`, `one_to_one`, or `one_to_many`.
+- In `sql`, `${CUBE}` is the declaring cube and `${Name}` any cube — both
+  resolve to the cube's alias in the compiled SQL.
+
+The compiler picks a single **base cube** — the cube owning the query's
+measures (all measures must share one cube), or the first dimension's cube for
+a measureless query — and traverses joins *away* from it as `LEFT JOIN`s,
+multi-hop included.
+
+**Only `many_to_one` and `one_to_one` edges are traversable.** A query that
+would traverse a `one_to_many` edge fails with `FanOut` at compile time — it
+would duplicate base rows and silently inflate every aggregate, and a wrong
+number is worse than a missing capability. Declare the query on the many side
+instead.
+
+**Tenant scope applies to every cube in the join tree.** A joined cube that
+declares a `tenant:` dimension contributes its own scope predicate, or the
+query fails closed exactly like an unscoped single-cube query.
+
+## Row mode boundary: `drill_members`
+
+`drill_members` on a cube lists the members a row-level ("show me the
+underlying records") query may project. It is deliberately also the **PII
+boundary**: row mode can only ever reveal what the cube explicitly published.
+A measure may declare its own `drill_members` to *narrow* the cube's list —
+never to widen it. A cube without `drill_members` has no row mode.
+
 ## Measures
 
 Measures are **aggregations**.

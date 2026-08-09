@@ -5,7 +5,7 @@
 //! UI-facing shape: cubes with their measures and dimensions keyed by
 //! `Cube.member`, with types/titles/format and the tenant flag — and no SQL.
 
-use crate::model::{DimensionType, MeasureType, Model};
+use crate::model::{DimensionType, JoinRelationship, MeasureType, Model};
 use serde::Serialize;
 
 /// The whole model's public catalog.
@@ -23,6 +23,20 @@ pub struct CubeMeta {
     pub description: Option<String>,
     pub measures: Vec<MeasureMeta>,
     pub dimensions: Vec<DimensionMeta>,
+    /// Join edges this cube declares — target + relationship only, no SQL.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub joins: Vec<JoinMeta>,
+    /// The cube's row-mode allowlist (and PII boundary). Empty = no row mode.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub drill_members: Vec<String>,
+}
+
+/// A join edge in the public catalog: where it goes and whether a query may
+/// traverse it — never the join SQL.
+#[derive(Debug, Clone, Serialize)]
+pub struct JoinMeta {
+    pub target: String,
+    pub relationship: JoinRelationship,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -37,6 +51,9 @@ pub struct MeasureMeta {
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
+    /// Measure-level narrowing of the cube's `drill_members`, if declared.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drill_members: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -49,6 +66,14 @@ pub struct DimensionMeta {
     pub title: Option<String>,
     /// True for the tenant/scope column (e.g. `workspace_id`).
     pub tenant: bool,
+    /// Member whose value is displayed for this dimension (auto-projected as
+    /// `"{member}__label"` when the dimension is selected).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// The entity a click on this dimension's value identifies (drives the
+    /// UI's `DrillEvent.entity`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drill_entity: Option<String>,
 }
 
 impl Model {
@@ -68,6 +93,7 @@ impl Model {
                         measure_type: m.measure_type,
                         title: m.title.clone(),
                         format: m.format.clone(),
+                        drill_members: m.drill_members.clone(),
                     })
                     .collect();
                 let dimensions = cube
@@ -79,6 +105,16 @@ impl Model {
                         dimension_type: d.dimension_type,
                         title: d.title.clone(),
                         tenant: d.tenant,
+                        label: d.label.clone(),
+                        drill_entity: d.drill.as_ref().map(|t| t.entity.clone()),
+                    })
+                    .collect();
+                let joins = cube
+                    .joins
+                    .iter()
+                    .map(|(target, j)| JoinMeta {
+                        target: target.clone(),
+                        relationship: j.relationship,
                     })
                     .collect();
                 CubeMeta {
@@ -87,6 +123,8 @@ impl Model {
                     description: cube.description.clone(),
                     measures,
                     dimensions,
+                    joins,
+                    drill_members: cube.drill_members.clone(),
                 }
             })
             .collect();
