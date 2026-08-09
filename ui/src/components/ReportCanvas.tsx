@@ -11,6 +11,8 @@ import { RefreshCw, Plus, Trash2, Pencil, TriangleAlert, Sparkles } from 'lucide
 import type { ReportDoc, WidgetSpec } from '../types'
 import type { WidgetRegistry } from '../registry'
 import { Widget } from './Widget'
+import type { GridQueryDelta } from './DataGrid'
+import { applyGridDelta } from '../querybuilder'
 import { FilterBar } from './FilterBar'
 import { ReportLoading } from './ReportLoading'
 import { WidgetError } from './WidgetError'
@@ -102,6 +104,19 @@ export function ReportCanvas({
     onChange({ ...report, widgets: report.widgets.filter((_, i) => i !== index) })
   const setFilters = (next: ReportFilters) => onChange({ ...report, filters: next })
 
+  // Server-driven grids: a sort/page delta patches the bound widget's QUERY
+  // (never the rendered rows) and the report re-resolves.
+  const gridQueryAt = (index: number) => (delta: GridQueryDelta) => {
+    const source = report.widgets[index]
+    if (source?.type !== 'bound') return
+    onChange({
+      ...report,
+      widgets: report.widgets.map((w, i) =>
+        i === index && w.type === 'bound' ? { ...w, query: applyGridDelta(w.query, delta) } : w,
+      ),
+    })
+  }
+
   const widgets = resolved?.widgets ?? []
   const failed = widgets.filter((w) => w.type === 'custom' && (w as { component?: string }).component === 'widget_error').length
 
@@ -147,7 +162,11 @@ export function ReportCanvas({
                   {spec.title && spec.type !== 'metric' && (
                     <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{spec.title}</div>
                   )}
-                  <Widget spec={spec} registry={mergedRegistry} />
+                  <Widget
+                    spec={spec}
+                    registry={mergedRegistry}
+                    onGridQuery={source?.type === 'bound' ? gridQueryAt(i) : undefined}
+                  />
                   <div className="absolute right-1 top-1 flex gap-1 opacity-0 transition-opacity group-hover/w:opacity-100">
                     {editable && (
                       <button type="button" onClick={() => onEditWidget!(source, i)} aria-label="Edit widget" className="flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:border-primary hover:text-primary">

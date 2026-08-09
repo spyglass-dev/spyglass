@@ -4,10 +4,11 @@
  * (e.g. react-markdown) to override.
  */
 import type { NoteSpec } from '../types'
+import { tokens } from '../tokens'
 
 export function Note({ spec }: { spec: NoteSpec }) {
   return (
-    <div style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6, color: '#374151' }}>
+    <div style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6, color: tokens.text }}>
       {spec.markdown}
     </div>
   )

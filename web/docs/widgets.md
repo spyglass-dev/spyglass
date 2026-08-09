@@ -16,7 +16,7 @@ one serializable document the agent emits, the host stores, and the UI renders.
 | Type | Renders |
 |------|---------|
 | `metric` | a single headline number |
-| `table` | `columns` + `rows` |
+| `table` | `DataGrid`: server-driven sort/paging, CSV, virtualization |
 | `chart` | a `bar` / `line` / `area` / `progress` mark |
 | `note` | markdown narrative |
 | `pivot` | rows × columns × one measure, from a flat group-by result |
@@ -24,6 +24,49 @@ one serializable document the agent emits, the host stores, and the UI renders.
 
 The package is dependency-light and inline-styled, so the same widgets render in
 the Studio and embed in any host app.
+
+### DataGrid: sort and paging are query deltas
+
+`DataGrid` (replacing the old static `DataTable`, which remains as an alias)
+renders `table` widgets. Its defining rule: **sort and paging write query
+deltas, never client-side array operations.** A header click emits
+`{ order: [{ member, desc }], offset: 0 }`; the pager emits `{ offset }`. The
+host applies the delta to the widget's cube query (`applyGridDelta`) and
+re-runs it — so sorting reorders *all* rows, not the visible page, and
+"1–25 of 312" reads the engine's `include_total` count. `ReportCanvas` wires
+this automatically for bound widgets; standalone use passes `onQuery`.
+Without `onQuery` the grid renders static data — no sort affordances, no pager.
+
+```json
+{
+  "type": "table",
+  "columns": [ { "key": "Orders.customer_id", "label": "Customer" } ],
+  "rows": [ ... ],
+  "total": 312,
+  "page": { "offset": 25, "limit": 25 },
+  "sort": { "key": "Orders.revenue", "desc": true },
+  "bars": "Orders.revenue"
+}
+```
+
+- **Label resolution** — a `"{member}__label"` column (the engine's label
+  auto-projection) is hidden and its text renders inside the base column, so
+  UUIDs display as names while sort/filter still act on the id.
+- **`truncatedAt`** — set from the engine's row cap; the grid says "results
+  truncated at N rows" instead of presenting a cutoff as the whole story.
+- **CSV** exports the *loaded* rows (the current page), labels resolved.
+- **Virtualization** — past 200 rows only the visible window mounts
+  (fixed-height rows, no dependencies).
+- `bars` draws proportional in-cell bars for one measure column.
+
+### Theming: one token layer
+
+Every color the widgets paint routes through `var(--rpt-*, fallback)` custom
+properties (`tokens` export): `--rpt-bg`, `--rpt-muted`, `--rpt-border`,
+`--rpt-text`, `--rpt-text-muted`, `--rpt-text-faint`, `--rpt-accent`,
+`--rpt-accent-soft`, `--rpt-positive`, `--rpt-negative`. Define any of them on
+an ancestor to restyle the whole widget set; with none defined the stock light
+theme renders. No CSS import, no Tailwind required.
 
 ### Pivot: a missing cell is not a zero
 

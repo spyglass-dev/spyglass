@@ -16,6 +16,17 @@ export { Widget } from './components/Widget'
 export { ReportView } from './components/ReportView'
 export { Metric } from './components/Metric'
 export { DataTable } from './components/DataTable'
+export {
+  DataGrid,
+  virtualWindow,
+  visibleColumns,
+  cellValue,
+  pageLabel,
+  tableToCsv,
+  VIRTUALIZE_AT,
+  type GridQueryDelta,
+} from './components/DataGrid'
+export { tokens, type Tokens } from './tokens'
 export { Chart } from './components/Chart'
 export { Note } from './components/Note'
 export {
