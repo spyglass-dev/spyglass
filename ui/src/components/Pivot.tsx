@@ -398,9 +398,16 @@ export function Pivot({
 }
 
 /** Footer count: "6 students" / "4 of 40 activities" — the axis dimension's
- *  humanized noun, naively pluralized. */
+ *  humanized noun, pluralized (activity → activities, class → classes). */
 function pivotCount(kept: number, truncated: number, member: string | undefined): string {
-  const noun = humanizeMember(member ?? '').toLowerCase() || 'rows'
-  const plural = kept + truncated === 1 || noun.endsWith('s') ? noun : `${noun}s`
+  const noun = humanizeMember(member ?? '').toLowerCase() || 'row'
+  const plural =
+    kept + truncated === 1
+      ? noun
+      : /[^aeiou]y$/.test(noun)
+        ? `${noun.slice(0, -1)}ies`
+        : /(s|x|z|ch|sh)$/.test(noun)
+          ? `${noun}es`
+          : `${noun}s`
   return truncated > 0 ? `${kept} of ${kept + truncated} ${plural}` : `${kept} ${plural}`
 }
