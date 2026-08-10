@@ -24,6 +24,44 @@ type VlSpec = Record<string, unknown>
 
 const EMBED_OPTIONS = { actions: false, renderer: 'svg', mode: 'vega-lite' } as const
 
+/** Categorical series palette — CVD-validated (lightness band, chroma floor,
+ *  adjacent-pair separation; contrast relief comes from axis labels + the CSV
+ *  table view). Fixed assignment order, never cycled. */
+export const CHART_SERIES = [
+  '#2a78d6', // blue
+  '#eb6834', // orange
+  '#1baf7a', // aqua
+  '#eda100', // yellow
+  '#e87ba4', // magenta
+  '#008300', // green
+  '#4a3aa7', // violet
+] as const
+
+/** The shared Vega-Lite config — recessive axes/grid, thin rounded bars, text
+ *  in muted ink, series colors from the validated palette. Default Vega (fat
+ *  saturated bars, dark rotated labels, boxed view) reads as unfinished next
+ *  to the rest of the widget set. */
+const CHART_CONFIG = {
+  background: 'transparent',
+  font: 'ui-sans-serif, system-ui, sans-serif',
+  view: { stroke: null },
+  axis: {
+    labelColor: '#6b7280',
+    titleColor: '#6b7280',
+    labelFontSize: 11,
+    gridColor: '#f3f4f6',
+    domainColor: '#e5e7eb',
+    tickColor: '#e5e7eb',
+    tickSize: 4,
+  },
+  legend: { labelColor: '#6b7280', titleColor: '#6b7280', labelFontSize: 11, symbolSize: 80 },
+  bar: { color: CHART_SERIES[0], cornerRadiusTopLeft: 3, cornerRadiusTopRight: 3 },
+  line: { color: CHART_SERIES[0], strokeWidth: 2 },
+  area: { color: CHART_SERIES[0], opacity: 0.2, line: { color: CHART_SERIES[0], strokeWidth: 2 } },
+  point: { color: CHART_SERIES[0], size: 70, filled: true },
+  range: { category: [...CHART_SERIES] },
+} as const
+
 function nums(series: Record<string, unknown>[], key: string): number[] {
   return series.map((r) => {
     const v = r[key]
@@ -85,8 +123,18 @@ function toVegaLite(chart: ChartSpec['chart']): VlSpec {
   const values = chart.series.map((r, i) => (hasX ? r : { ...r, _i: i + 1 }))
 
   const vmark = mark === 'progress' ? 'bar' : mark
+  const xt = xType(values, hasX ? xField : undefined, mark)
   const encoding: Record<string, unknown> = {
-    x: { field: esc(xField), type: xType(values, hasX ? xField : undefined, mark), title: null },
+    x: {
+      field: esc(xField),
+      type: xt,
+      title: null,
+      // Straight, ellipsis-truncated category labels — never rotated text
+      // (the default -90° spin is the loudest "unstyled Vega" signal).
+      ...(xt === 'nominal'
+        ? { axis: { labelAngle: 0, labelLimit: 96, labelOverlap: 'parity' }, scale: { paddingInner: 0.35, paddingOuter: 0.15 } }
+        : {}),
+    },
     y: { field: esc(y), type: 'quantitative', title: null, axis: valueAxis(format) },
   }
   if (color) {
@@ -108,6 +156,7 @@ function toVegaLite(chart: ChartSpec['chart']): VlSpec {
     width: 'container',
     height: 220,
     autosize: { type: 'fit', contains: 'padding' },
+    config: CHART_CONFIG,
   }
 }
 
@@ -118,7 +167,8 @@ export function Chart({ spec }: { spec: ChartSpec }) {
   // default dataset when the spec doesn't carry its own data.
   const rawSpec = useMemo<VlSpec | null>(() => {
     if (!vlSpec) return null
-    const s = { width: 'container', ...vlSpec } as VlSpec
+    // Theme as a DEFAULT — a raw spec carrying its own `config` wins outright.
+    const s = { width: 'container', config: CHART_CONFIG, ...vlSpec } as VlSpec
     if (!('data' in s)) s.data = { values: series }
     return s
   }, [vlSpec, series])

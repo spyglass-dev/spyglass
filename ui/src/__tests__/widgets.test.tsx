@@ -77,3 +77,21 @@ describe('ReportCanvas edit affordance', () => {
     expect(screen.getAllByLabelText('Edit widget')).toHaveLength(1)
   })
 })
+
+describe('note markdown subset', () => {
+  it('renders emphasis and headings instead of raw marker characters', () => {
+    render(
+      <Widget
+        spec={{
+          type: 'note',
+          markdown: '## Term summary\n\n_Amira_ has made **strong** progress with `haiku` form.',
+        }}
+      />,
+    )
+    expect(screen.getByText('Term summary')).toBeTruthy()
+    expect(screen.getByText('Amira').tagName).toBe('EM')
+    expect(screen.getByText('strong').tagName).toBe('STRONG')
+    expect(screen.getByText('haiku').tagName).toBe('CODE')
+    expect(screen.queryByText(/\*\*|_Amira_/)).toBeNull()
+  })
+})

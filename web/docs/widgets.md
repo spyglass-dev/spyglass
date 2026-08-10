@@ -18,7 +18,7 @@ one serializable document the agent emits, the host stores, and the UI renders.
 | `metric` | a single headline number |
 | `table` | `DataGrid`: server-driven sort/paging, CSV, virtualization |
 | `chart` | a `bar` / `line` / `area` / `progress` mark |
-| `note` | markdown narrative |
+| `note` | markdown narrative — the base renderer covers headings, `**bold**`, `*italic*`/`_italic_` and `` `code` `` without dependencies; register a `note` custom widget for full markdown |
 | `pivot` | rows × columns × one measure, from a flat group-by result |
 | `custom` | a host-registered component with frozen data |
 | `view` | a host-registered component **bound to a query** — live, filtered, drillable |
@@ -145,6 +145,19 @@ about it. The same two-dimension group-by that feeds a table feeds a pivot:
 In the query-builder, choose *Pivot* with two group-bys and one measure:
 the first dimension becomes rows, the second columns. With fewer than two
 dimensions the draft degrades to a plain table.
+
+`totals.rowLabel` / `totals.colLabel` name the edge totals in the domain's
+words — a gradebook says "Average" and "Class average", not the generic
+Total/Avg. The pivot also footers its axis counts ("6 students · 4
+activities" — the axis dimension's humanized noun) and, when `scale` shading
+is on, a low→high legend beside the absent-cell marker.
+
+Charts ship a quiet default theme — recessive axes and grid, thin rounded
+bars, straight ellipsis-truncated category labels, and a CVD-validated
+categorical palette (`CHART_SERIES`) assigned in fixed order. A raw `vlSpec`
+carrying its own `config` overrides the theme wholesale. Table and metric
+headers derive from `humanizeMember` — `Cube.activity_id` renders as
+"Activity" (ids defer to their `label:` companions for values).
 
 ## Report doc
 

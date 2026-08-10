@@ -12,6 +12,7 @@
  */
 import type { CSSProperties } from 'react'
 import { formatValue, type PivotSpec, type PivotTotal, type ValueFormat } from '../types'
+import { humanizeMember } from '../querybuilder'
 import { tokens } from '../tokens'
 
 /** Hard caps: a pivot is a summary, not a data dump. Beyond these it
@@ -267,7 +268,7 @@ export function Pivot({
               ))}
               {spec.totals?.row && (
                 <th style={{ ...headerStyle, textAlign: 'right' }}>
-                  {spec.totals.row === 'avg' ? 'Avg' : 'Total'}
+                  {spec.totals.rowLabel ?? (spec.totals.row === 'avg' ? 'Avg' : 'Total')}
                 </th>
               )}
             </tr>
@@ -315,7 +316,7 @@ export function Pivot({
             {built.colTotals && (
               <tr style={{ borderTop: `2px solid ${tokens.border}` }}>
                 <td style={{ ...stickyFirstCol, ...totalCell, textAlign: 'left' }}>
-                  {spec.totals?.col === 'avg' ? 'Avg' : 'Total'}
+                  {spec.totals?.colLabel ?? (spec.totals?.col === 'avg' ? 'Avg' : 'Total')}
                 </td>
                 {built.colTotals.map((t, ci) => (
                   <td key={built.cols[ci].key} style={totalCell}>
@@ -339,6 +340,47 @@ export function Pivot({
           </tbody>
         </table>
       </div>
+      {built.rows.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 12,
+            padding: '6px 12px',
+            fontSize: 12,
+            color: tokens.textFaint,
+            borderTop: `1px solid ${tokens.border}`,
+          }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {spec.scale && spec.scale !== 'none' && (
+              <>
+                {[0.15, 0.5, 0.9].map((t) => (
+                  <span
+                    key={t}
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: 2,
+                      display: 'inline-block',
+                      background: cellShade(built.min + t * (built.max - built.min), built.min, built.max, spec.scale),
+                      border: `1px solid ${tokens.border}`,
+                    }}
+                  />
+                ))}
+                <span>shaded low → high</span>
+                <span>·</span>
+              </>
+            )}
+            <span>— no record</span>
+          </span>
+          <span>
+            {pivotCount(built.rows.length, built.truncatedRows, spec.rows[0])} ·{' '}
+            {pivotCount(built.cols.length, built.truncatedCols, spec.cols[0])}
+          </span>
+        </div>
+      )}
       {(built.truncatedRows > 0 || built.truncatedCols > 0) && (
         <div style={{ padding: '6px 12px', fontSize: 12, color: tokens.textFaint, borderTop: `1px solid ${tokens.border}` }}>
           {[
@@ -353,4 +395,12 @@ export function Pivot({
       )}
     </div>
   )
+}
+
+/** Footer count: "6 students" / "4 of 40 activities" — the axis dimension's
+ *  humanized noun, naively pluralized. */
+function pivotCount(kept: number, truncated: number, member: string | undefined): string {
+  const noun = humanizeMember(member ?? '').toLowerCase() || 'rows'
+  const plural = kept + truncated === 1 || noun.endsWith('s') ? noun : `${noun}s`
+  return truncated > 0 ? `${kept} of ${kept + truncated} ${plural}` : `${kept} ${plural}`
 }

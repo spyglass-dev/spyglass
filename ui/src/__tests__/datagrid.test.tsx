@@ -13,7 +13,7 @@ import {
   visibleColumns,
   VIRTUALIZE_AT,
 } from '../components/DataGrid'
-import { applyGridDelta, draftToWidgetSpec } from '../querybuilder'
+import { applyGridDelta, draftToWidgetSpec, humanizeMember } from '../querybuilder'
 import type { TableSpec } from '../types'
 
 const spec = (extra?: Partial<TableSpec>): TableSpec => ({
@@ -242,5 +242,14 @@ describe('draftToWidgetSpec drill entity', () => {
     if (s.type !== 'table') throw new Error('expected table')
     expect(s.columns.find((c) => c.key === 'Orders.customer_id')?.drillEntity).toBe('customer')
     expect(s.columns.find((c) => c.key === 'Orders.status')?.drillEntity).toBeUndefined()
+  })
+})
+
+describe('humanizeMember', () => {
+  it('turns member keys into readable headers — ids defer to their labels', () => {
+    expect(humanizeMember('Scores.activity_id')).toBe('Activity')
+    expect(humanizeMember('Scores.score_weighted')).toBe('Score weighted')
+    expect(humanizeMember('graded_answers')).toBe('Graded answers')
+    expect(humanizeMember('Events.created_at')).toBe('Created at')
   })
 })
