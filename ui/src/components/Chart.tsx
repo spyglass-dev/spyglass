@@ -148,21 +148,16 @@ function toVegaLite(chart: ChartSpec['chart']): VlSpec {
     }
   }
 
-  // A couple of categories across a full-width container become slabs —
-  // cap the bar itself when the bands are wide (few categories can't
-  // overlap a fixed width; many categories keep the relative padding).
+  // A couple of categories stretched across a full-width container become
+  // slabs — size the plot to the data instead (a fixed step per category,
+  // capped), and let it sit left in the frame like any other small chart.
   const fewBars = vmark === 'bar' && xt === 'nominal' && values.length <= 5
   return {
     $schema: 'https://vega.github.io/schema/vega-lite/v6.json',
     data: { values },
-    mark: {
-      type: vmark,
-      tooltip: true,
-      ...(mark === 'point' ? { filled: true } : {}),
-      ...(fewBars ? { discreteBandSize: 56 } : {}),
-    },
+    mark: { type: vmark, tooltip: true, ...(mark === 'point' ? { filled: true } : {}) },
     encoding,
-    width: 'container',
+    width: fewBars ? Math.min(values.length * 150, 640) : 'container',
     height: 220,
     autosize: { type: 'fit', contains: 'padding' },
     config: CHART_CONFIG,
