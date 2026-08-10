@@ -121,6 +121,8 @@ saved document stores the *intent* and the window moves:
 
 Grammar: `today` · `yesterday` · `ytd` · `last N days|weeks|months|quarters|years`
 (the current period plus the N−1 before it, so `last 30 days` includes today)
+· `next N <unit>` (the mirror — the current period plus the N−1 after it, so
+`next 31 days` starts today; forward windows like "trials ending soon")
 · `this week|month|quarter|year` · `previous <unit>` (`last <unit>` with no
 number means the same). Periods are calendar-aligned in the query's
 `timezone` (IANA name, default UTC); weeks start on Monday (ISO). An
