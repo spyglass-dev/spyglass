@@ -238,4 +238,14 @@ pub struct Column {
     pub key: String,
     /// `measure` | `dimension` | `time`.
     pub kind: String,
+    /// The projected dimension's `drill: { entity }` annotation, so a result
+    /// consumer can wire entity navigation without re-joining `/meta`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drill_entity: Option<String>,
+}
+
+impl Column {
+    pub fn new(key: impl Into<String>, kind: impl Into<String>) -> Self {
+        Self { key: key.into(), kind: kind.into(), drill_entity: None }
+    }
 }
