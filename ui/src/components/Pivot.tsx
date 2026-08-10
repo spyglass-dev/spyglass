@@ -11,7 +11,7 @@
  * Conflating these is the classic way a gradebook lies.
  */
 import type { CSSProperties } from 'react'
-import { formatValue, type PivotSpec, type ValueFormat } from '../types'
+import { formatValue, type PivotSpec, type PivotTotal, type ValueFormat } from '../types'
 import { tokens } from '../tokens'
 
 /** Hard caps: a pivot is a summary, not a data dump. Beyond these it
@@ -21,8 +21,10 @@ export const MAX_PIVOT_COLS = 24
 
 export type PivotCell =
   | { state: 'absent' }
-  | { state: 'null' }
-  | { state: 'value'; value: number | string }
+  /** Present-but-null and real values keep their SOURCE data row — what makes
+   *  a cell a drill target (the row carries both dimension values). */
+  | { state: 'null'; row: Record<string, unknown> }
+  | { state: 'value'; value: number | string; row: Record<string, unknown> }
 
 export interface PivotAxisItem {
   /** Composite key of the axis dimension values (join of raw values). */
@@ -68,6 +70,36 @@ function aggregate(values: number[], how: 'avg' | 'sum'): number | undefined {
   return how === 'sum' ? sum : sum / values.length
 }
 
+const num = (v: unknown): number => (typeof v === 'number' ? v : Number(v) || 0)
+
+/** A `ratio` total over a slice's SOURCE rows: scale × Σnum ÷ Σden. Absent
+ *  combinations contribute nothing (no marks earned, none possible) — which
+ *  is exactly why this is a weighted total and not a mean of cells. */
+function ratioTotal(
+  rows: Record<string, unknown>[],
+  ratio: Exclude<PivotTotal, 'avg' | 'sum'>['ratio'],
+): number | undefined {
+  if (rows.length === 0) return undefined
+  const den = rows.reduce((a, r) => a + num(r[ratio.den]), 0)
+  if (den === 0) return undefined
+  const n = rows.reduce((a, r) => a + num(r[ratio.num]), 0)
+  return (n / den) * (ratio.scale ?? 1)
+}
+
+/** Rows backing a slice of cells (absent cells carry none). */
+function cellRows(cells: PivotCell[]): Record<string, unknown>[] {
+  return cells.flatMap((c) => (c.state === 'absent' ? [] : [c.row]))
+}
+
+function sliceTotal(
+  cells: PivotCell[],
+  how: PivotTotal,
+  cellNumbers: (cell: PivotCell) => number | undefined,
+): number | undefined {
+  if (typeof how !== 'string') return ratioTotal(cellRows(cells), how.ratio)
+  return aggregate(cells.map(cellNumbers).filter((n): n is number => n !== undefined), how)
+}
+
 /** Pure pivot construction — exported for tests and for hosts that want the
  *  matrix without the markup (e.g. an export path). */
 export function buildPivot(spec: PivotSpec): BuiltPivot {
@@ -92,8 +124,8 @@ export function buildPivot(spec: PivotSpec): BuiltPivot {
     const raw = row[spec.measure]
     const cell: PivotCell =
       raw == null
-        ? { state: 'null' }
-        : { state: 'value', value: typeof raw === 'number' ? raw : String(raw) }
+        ? { state: 'null', row }
+        : { state: 'value', value: typeof raw === 'number' ? raw : String(raw), row }
     cells.set(rk + SEP + ck, cell)
   }
 
@@ -125,12 +157,7 @@ export function buildPivot(spec: PivotSpec): BuiltPivot {
         if (cell.value > max) max = cell.value
       }
     }
-    const total = spec.totals?.row
-      ? aggregate(
-          rowCells.map(cellNumbers).filter((n): n is number => n !== undefined),
-          spec.totals.row,
-        )
-      : undefined
+    const total = spec.totals?.row ? sliceTotal(rowCells, spec.totals.row, cellNumbers) : undefined
     return { item, cells: rowCells, total }
   })
 
@@ -138,17 +165,14 @@ export function buildPivot(spec: PivotSpec): BuiltPivot {
   let grandTotal: number | undefined
   if (spec.totals?.col) {
     const how = spec.totals.col
-    colTotals = keptCols.map((_, ci) =>
-      aggregate(
-        rows.map((r) => cellNumbers(r.cells[ci])).filter((n): n is number => n !== undefined),
-        how,
-      ),
-    )
+    colTotals = keptCols.map((_, ci) => sliceTotal(rows.map((r) => r.cells[ci]), how, cellNumbers))
     if (spec.totals.row) {
-      grandTotal = aggregate(
-        rows.map((r) => r.total).filter((n): n is number => n !== undefined),
-        how,
-      )
+      // Ratio grand total re-derives from ALL kept source rows — a ratio of
+      // ratios would re-introduce the weighting error at the corner.
+      grandTotal =
+        typeof how !== 'string'
+          ? ratioTotal(cellRows(rows.flatMap((r) => r.cells)), how.ratio)
+          : aggregate(rows.map((r) => r.total).filter((n): n is number => n !== undefined), how)
     }
   }
 
@@ -210,7 +234,17 @@ const stickyFirstCol: CSSProperties = {
   zIndex: 1,
 }
 
-export function Pivot({ spec }: { spec: PivotSpec }) {
+export function Pivot({
+  spec,
+  onMeasureClick,
+}: {
+  spec: PivotSpec
+  /** Cell drill (records drawer): called with the cell's SOURCE data row —
+   *  which carries BOTH axis dimension values — and the pivot measure. The
+   *  same contract as a table's measure click, so hosts wire nothing new.
+   *  Absent cells have no row and are not drill targets. */
+  onMeasureClick?: (row: Record<string, unknown>, columnKey: string) => void
+}) {
   const built = buildPivot(spec)
   const totalCell: CSSProperties = {
     padding: '8px 12px',
@@ -233,7 +267,7 @@ export function Pivot({ spec }: { spec: PivotSpec }) {
               ))}
               {spec.totals?.row && (
                 <th style={{ ...headerStyle, textAlign: 'right' }}>
-                  {spec.totals.row === 'sum' ? 'Total' : 'Avg'}
+                  {spec.totals.row === 'avg' ? 'Avg' : 'Total'}
                 </th>
               )}
             </tr>
@@ -244,22 +278,33 @@ export function Pivot({ spec }: { spec: PivotSpec }) {
                 <td style={{ ...stickyFirstCol, padding: '8px 12px', fontWeight: 500, color: tokens.text, whiteSpace: 'nowrap' }}>
                   {r.item.label}
                 </td>
-                {r.cells.map((cell, ci) => (
-                  <td
-                    key={built.cols[ci].key}
-                    style={{
-                      padding: '8px 12px',
-                      textAlign: 'right',
-                      color: cell.state === 'value' ? tokens.text : tokens.textFaint,
-                      background:
-                        cell.state === 'value' && typeof cell.value === 'number'
-                          ? cellShade(cell.value, built.min, built.max, spec.scale)
-                          : undefined,
-                    }}
-                  >
-                    {renderCell(cell, spec.empty, spec.format)}
-                  </td>
-                ))}
+                {r.cells.map((cell, ci) => {
+                  const drillable = onMeasureClick && cell.state !== 'absent'
+                  return (
+                    <td
+                      key={built.cols[ci].key}
+                      onClick={drillable ? () => onMeasureClick(cell.row, spec.measure) : undefined}
+                      role={drillable ? 'button' : undefined}
+                      title={drillable ? 'Show the records behind this cell' : undefined}
+                      style={{
+                        padding: '8px 12px',
+                        textAlign: 'right',
+                        cursor: drillable ? 'pointer' : undefined,
+                        textDecoration: drillable ? 'underline' : undefined,
+                        textDecorationStyle: 'dotted',
+                        textDecorationColor: tokens.border,
+                        textUnderlineOffset: 3,
+                        color: cell.state === 'value' ? tokens.text : tokens.textFaint,
+                        background:
+                          cell.state === 'value' && typeof cell.value === 'number'
+                            ? cellShade(cell.value, built.min, built.max, spec.scale)
+                            : undefined,
+                      }}
+                    >
+                      {renderCell(cell, spec.empty, spec.format)}
+                    </td>
+                  )
+                })}
                 {spec.totals?.row && (
                   <td style={totalCell}>
                     {r.total === undefined ? '—' : formatValue(r.total, spec.format)}
@@ -270,7 +315,7 @@ export function Pivot({ spec }: { spec: PivotSpec }) {
             {built.colTotals && (
               <tr style={{ borderTop: `2px solid ${tokens.border}` }}>
                 <td style={{ ...stickyFirstCol, ...totalCell, textAlign: 'left' }}>
-                  {spec.totals?.col === 'sum' ? 'Total' : 'Avg'}
+                  {spec.totals?.col === 'avg' ? 'Avg' : 'Total'}
                 </td>
                 {built.colTotals.map((t, ci) => (
                   <td key={built.cols[ci].key} style={totalCell}>

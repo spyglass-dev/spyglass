@@ -123,9 +123,20 @@ about it. The same two-dimension group-by that feeds a table feeds a pivot:
   (or `0` with `empty: "zero"`), a *present-but-null* measure renders `n/a`,
   and a real `0` renders as `0`. Conflating these is how a matrix lies —
   "never attempted" and "scored zero" are different facts.
-- `totals` adds edge aggregates (`avg`/`sum` per edge). They aggregate the
-  values that exist; absent cells join in only under `empty: "zero"`, null
-  never does.
+- `totals` adds edge aggregates. `avg`/`sum` fold the CELL values that exist
+  (absent cells join in only under `empty: "zero"`, null never does). A
+  **`ratio` total** — `{ "ratio": { "num": "Reviews.points", "den":
+  "Reviews.possible", "scale": 100 } }` — divides two other measures summed
+  over the same slice. Use it whenever the cell measure is itself a ratio: a
+  mean of per-cell percentages is not a weighted total (with uneven
+  denominators it inflates small cells — the classic gradebook lie at the
+  totals edge), and the grand total re-derives from all source rows rather
+  than averaging the edge.
+- **Cells are drill targets**: a present cell keeps its source data row —
+  which carries both axis dimension values — and `Pivot onMeasureClick` hands
+  it back on click, the same contract as a table's measure click. On
+  `ReportCanvas` that opens the records drawer narrowed to the exact cell.
+  Absent cells have no row and are not drill targets.
 - `scale` opts into cell shading: `sequential` ramps min→max, `diverging`
   splits around the midpoint. Off by default.
 - The pivot caps at **60 rows × 24 columns** and says how much it cut —

@@ -4,7 +4,7 @@
  * `QueryBuilder` component edits a `WidgetDraft`; a host runs the query and the
  * pure `draftToWidgetSpec` turns the result into a renderable `WidgetSpec`.
  */
-import type { WidgetSpec, ValueFormat, ChartMark } from './types'
+import type { WidgetSpec, PivotSpec, ValueFormat, ChartMark } from './types'
 
 // ── Catalog (mirrors the engine's /meta) ────────────────────────────────────
 
@@ -82,6 +82,9 @@ export interface WidgetDraft {
   mark?: ChartMark
   x?: string
   y?: string
+  /** Pivot rendering options (`as: 'pivot'`): edge totals (incl. `ratio`
+   *  weighted totals), shading, and how absent combinations render. */
+  pivot?: Pick<PivotSpec, 'totals' | 'scale' | 'empty'>
 }
 
 /** The shape a host's query runner returns (matches the engine's QueryResult). */
@@ -177,6 +180,7 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
         measure,
         data: result.rows,
         format: draft.format,
+        ...draft.pivot,
       }
     }
     return draftToWidgetSpec({ ...draft, as: 'table' }, result)

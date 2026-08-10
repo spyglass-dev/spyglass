@@ -131,6 +131,14 @@ export interface CustomSpec extends WidgetBase {
   props?: Record<string, unknown>
 }
 
+/** How a pivot edge total aggregates. `avg`/`sum` fold the CELL values; a
+ *  `ratio` total divides two OTHER measures summed over the same slice
+ *  (`scale` multiplies the quotient, e.g. 100 for percent cells). The ratio
+ *  form exists because a mean of per-cell percentages is not a weighted
+ *  total — with uneven denominators it inflates small cells, the classic
+ *  gradebook lie at the totals edge. */
+export type PivotTotal = 'avg' | 'sum' | { ratio: { num: string; den: string; scale?: number } }
+
 /** A pivot: rows × columns × one measure, rendered from an ordinary
  *  two-dimension group-by result. The pivot is a RENDERING — the engine knows
  *  nothing about it. The load-bearing rule: **a missing cell is not a zero.**
@@ -147,11 +155,12 @@ export interface PivotSpec extends WidgetBase {
   /** The measure member filling cells. */
   measure: string
   /** Flat group-by rows: each carries the row/col dimension values (+ optional
-   *  `__label` companions) and the measure. */
+   *  `__label` companions) and the measure. For `ratio` totals the rows also
+   *  carry the numerator/denominator measures. */
   data: Record<string, unknown>[]
   /** Edge totals: `row` aggregates across a row (right edge), `col` down a
    *  column (bottom edge). Absent = no totals. */
-  totals?: { row?: 'avg' | 'sum'; col?: 'avg' | 'sum' }
+  totals?: { row?: PivotTotal; col?: PivotTotal }
   /** Cell shading (off by default). `sequential` ramps min→max; `diverging`
    *  splits around the midpoint. */
   scale?: 'none' | 'sequential' | 'diverging'
