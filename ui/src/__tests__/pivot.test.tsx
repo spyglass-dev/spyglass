@@ -34,10 +34,12 @@ describe('buildPivot', () => {
   it('keeps absent, null, and zero as three distinct states', () => {
     const b = buildPivot(spec(sparse))
     const [c1, c2] = b.rows
-    expect(c1.cells[0]).toEqual({ state: 'value', value: 10 })
-    expect(c1.cells[1]).toEqual({ state: 'null' })
+    expect(c1.cells[0]).toMatchObject({ state: 'value', value: 10 })
+    expect(c1.cells[1]).toMatchObject({ state: 'null' })
     expect(c2.cells[0]).toEqual({ state: 'absent' })
-    expect(c2.cells[1]).toEqual({ state: 'value', value: 0 })
+    expect(c2.cells[1]).toMatchObject({ state: 'value', value: 0 })
+    // Present cells keep their SOURCE row — what makes a cell a drill target.
+    expect((c1.cells[0] as { row?: unknown }).row).toMatchObject({ 'Orders.customer_id': 'c1' })
   })
 
   it('excludes absent and null cells from totals by default', () => {
@@ -179,5 +181,97 @@ describe('draftToWidgetSpec pivot branch', () => {
       result,
     )
     expect(spec.type).toBe('table')
+  })
+})
+
+// Ratio (weighted) totals: two "assignments" with very different weight.
+// c1: earned 1/1 (100%) and 1/9 (11.1%). A mean of cell percentages says
+// ~55.6 — the weighted truth is 2 of 10 marks = 20.
+const weighted = [
+  { 'S.student': 'c1', 'S.activity': 'a1', 'S.pct': 100, 'S.earned': 1, 'S.possible': 1 },
+  { 'S.student': 'c1', 'S.activity': 'a2', 'S.pct': 11.11, 'S.earned': 1, 'S.possible': 9 },
+  { 'S.student': 'c2', 'S.activity': 'a1', 'S.pct': 0, 'S.earned': 0, 'S.possible': 1 },
+]
+const ratio = { ratio: { num: 'S.earned', den: 'S.possible', scale: 100 } }
+const wspec = (extra?: Partial<PivotSpec>): PivotSpec => ({
+  type: 'pivot',
+  rows: ['S.student'],
+  cols: ['S.activity'],
+  measure: 'S.pct',
+  data: weighted,
+  ...extra,
+})
+
+describe('ratio (weighted) totals', () => {
+  it('a row total is Σnum/Σden — not the mean of cell percentages', () => {
+    const b = buildPivot(wspec({ totals: { row: ratio } }))
+    expect(b.rows[0].total).toBeCloseTo(20) // 2/10 marks, NOT ~55.6
+    expect(b.rows[1].total).toBeCloseTo(0)
+  })
+
+  it('column and grand totals re-derive from source rows (no ratio-of-ratios)', () => {
+    const b = buildPivot(wspec({ totals: { row: ratio, col: ratio } }))
+    expect(b.colTotals?.[0]).toBeCloseTo(50) // a1: 1 of 2 marks
+    expect(b.colTotals?.[1]).toBeCloseTo(100 / 9) // a2: 1 of 9
+    expect(b.grandTotal).toBeCloseTo((2 / 11) * 100) // all: 2 of 11 marks
+  })
+
+  it('an absent combination contributes nothing to a ratio total', () => {
+    // c2 never met a2: their total is over a1 only (0/1), not 0/10.
+    const b = buildPivot(wspec({ totals: { row: ratio } }))
+    expect(b.rows[1].total).toBeCloseTo(0)
+    const denOnlyPresent = buildPivot(
+      wspec({ totals: { row: ratio }, data: weighted.slice(0, 2) }),
+    )
+    expect(denOnlyPresent.rows[0].total).toBeCloseTo(20)
+  })
+})
+
+describe('cell drill', () => {
+  it('clicking a present cell hands back its SOURCE row and the measure', () => {
+    const clicks: unknown[] = []
+    render(
+      <Pivot
+        spec={spec(sparse)}
+        onMeasureClick={(row, measure) => clicks.push({ row, measure })}
+      />,
+    )
+    screen.getByText('10').click()
+    expect(clicks).toHaveLength(1)
+    expect(clicks[0]).toMatchObject({
+      measure: 'Orders.total_amount',
+      row: { 'Orders.customer_id': 'c1', 'Orders.product_id': 'p1' },
+    })
+  })
+
+  it('an absent cell is not a drill target', () => {
+    const clicks: unknown[] = []
+    render(<Pivot spec={spec(sparse)} onMeasureClick={(row) => clicks.push(row)} />)
+    // c2×p1 is absent → renders the dash, unclickable.
+    const dash = screen.getByText('—')
+    expect(dash.getAttribute('role')).toBeNull()
+    dash.click()
+    expect(clicks).toHaveLength(0)
+  })
+})
+
+describe('pivot options through the draft', () => {
+  it('draftToWidgetSpec carries totals/scale/empty onto the spec', () => {
+    const s = draftToWidgetSpec(
+      {
+        as: 'pivot',
+        query: { measures: ['Orders.total_amount'], dimensions: ['Orders.customer_id', 'Orders.product_id'] },
+        pivot: { totals: { row: ratio }, scale: 'sequential', empty: 'dash' },
+      },
+      {
+        columns: [
+          { key: 'Orders.customer_id', kind: 'dimension' },
+          { key: 'Orders.product_id', kind: 'dimension' },
+          { key: 'Orders.total_amount', kind: 'measure' },
+        ],
+        rows: sparse,
+      },
+    )
+    expect(s).toMatchObject({ type: 'pivot', totals: { row: ratio }, scale: 'sequential', empty: 'dash' })
   })
 })

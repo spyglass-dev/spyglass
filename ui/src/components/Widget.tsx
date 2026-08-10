@@ -52,7 +52,10 @@ export function Widget({
     case 'note':
       return <Note spec={spec} />
     case 'pivot':
-      return <Pivot spec={spec} />
+      // Cells share the table's measure-click contract: the source row
+      // carries both axis dimensions, so the records drawer narrows to the
+      // exact cell (e.g. one student's answers on one activity).
+      return <Pivot spec={spec} onMeasureClick={onMeasureClick} />
     case 'view': {
       // An unmet contract or unknown component renders widget_error — NEVER
       // a blank cell.

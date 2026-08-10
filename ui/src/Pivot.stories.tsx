@@ -95,3 +95,38 @@ export const CappedWithTruncationNotice = {
 export const EmptyDataset = {
   render: () => <Pivot spec={{ ...base, data: [] }} />,
 }
+
+/** Weighted (ratio) totals: assignments carry very different mark weights, so
+ *  the Total edge is Σearned/Σpossible — NOT the mean of cell percentages.
+ *  Karl's mean-of-cells would read ~55%; his weighted total is 20%. */
+const gradebookLike: PivotSpec = {
+  type: 'pivot',
+  title: 'Score % — trainee × assignment (weighted totals)',
+  rows: ['Training.trainee_id'],
+  cols: ['Training.assignment_id'],
+  measure: 'Training.score_pct',
+  format: 'percent',
+  totals: {
+    row: { ratio: { num: 'Training.points', den: 'Training.possible', scale: 100 } },
+    col: { ratio: { num: 'Training.points', den: 'Training.possible', scale: 100 } },
+  },
+  data: [
+    { 'Training.trainee_id': 't1', 'Training.trainee_id__label': 'Karl', 'Training.assignment_id': 'a1', 'Training.assignment_id__label': 'Quiz (1 pt)', 'Training.score_pct': 100, 'Training.points': 1, 'Training.possible': 1 },
+    { 'Training.trainee_id': 't1', 'Training.trainee_id__label': 'Karl', 'Training.assignment_id': 'a2', 'Training.assignment_id__label': 'Project (9 pt)', 'Training.score_pct': 11, 'Training.points': 1, 'Training.possible': 9 },
+    { 'Training.trainee_id': 't2', 'Training.trainee_id__label': 'Mona', 'Training.assignment_id': 'a1', 'Training.assignment_id__label': 'Quiz (1 pt)', 'Training.score_pct': 0, 'Training.points': 0, 'Training.possible': 1 },
+    { 'Training.trainee_id': 't2', 'Training.trainee_id__label': 'Mona', 'Training.assignment_id': 'a2', 'Training.assignment_id__label': 'Project (9 pt)', 'Training.score_pct': 89, 'Training.points': 8, 'Training.possible': 9 },
+    { 'Training.trainee_id': 't3', 'Training.trainee_id__label': 'Ana', 'Training.assignment_id': 'a2', 'Training.assignment_id__label': 'Project (9 pt)', 'Training.score_pct': null, 'Training.points': 0, 'Training.possible': 0 },
+  ],
+}
+
+export const WeightedRatioTotals = {
+  render: () => (
+    <Pivot
+      spec={gradebookLike}
+      onMeasureClick={(row) => {
+        // eslint-disable-next-line no-alert -- storybook affordance demo
+        alert(`drill: ${JSON.stringify(row)}`)
+      }}
+    />
+  ),
+}
