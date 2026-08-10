@@ -4,7 +4,7 @@
  * `QueryBuilder` component edits a `WidgetDraft`; a host runs the query and the
  * pure `draftToWidgetSpec` turns the result into a renderable `WidgetSpec`.
  */
-import type { WidgetSpec, PivotSpec, ValueFormat, ChartMark } from './types'
+import type { WidgetSpec, MetricSpec, PivotSpec, TableColumn, ValueFormat, ChartMark } from './types'
 
 // ── Catalog (mirrors the engine's /meta) ────────────────────────────────────
 
@@ -59,7 +59,13 @@ export interface WidgetQuery {
   measures?: string[]
   dimensions?: string[]
   filters?: QueryFilter[]
-  timeDimensions?: { dimension: string; granularity?: string; dateRange?: [string, string] }[]
+  timeDimensions?: {
+    dimension: string
+    granularity?: string
+    dateRange?: [string, string]
+    /** Engine comparison window — `__prev_<measure>` columns come back. */
+    compare?: 'previous_period' | 'previous_year'
+  }[]
   order?: { member: string; desc?: boolean }[]
   limit?: number
   /** Rows to skip — server-driven paging (engine `offset`). */
@@ -85,6 +91,9 @@ export interface WidgetDraft {
   /** Pivot rendering options (`as: 'pivot'`): edge totals (incl. `ratio`
    *  weighted totals), shading, and how absent combinations render. */
   pivot?: Pick<PivotSpec, 'totals' | 'scale' | 'empty'>
+  /** Per-member column overrides (`as: 'table'`): label, format, pill. Keyed
+   *  by result-column member key. */
+  columns?: Record<string, Partial<Pick<TableColumn, 'label' | 'format' | 'pill'>>>
 }
 
 /** The shape a host's query runner returns (matches the engine's QueryResult). */
@@ -147,6 +156,21 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
     const measure = draft.query.measures?.[0]
     const raw = measure ? result.rows[0]?.[measure] : undefined
     const value = typeof raw === 'number' ? raw : raw == null ? 0 : Number(raw) || 0
+    // Comparison window (`compare` on the time dimension) → delta chip:
+    // "↓9.4pt vs previous period" beside the headline number.
+    let delta: MetricSpec['delta']
+    const prevRaw = measure ? result.rows[0]?.[`__prev_${measure}`] : undefined
+    const prev = typeof prevRaw === 'number' ? prevRaw : prevRaw == null ? undefined : Number(prevRaw)
+    if (prev !== undefined && !Number.isNaN(prev)) {
+      const diff = Math.round((value - prev) * 10) / 10
+      const compare = draft.query.timeDimensions?.find((td) => td.compare)?.compare
+      delta = {
+        value: diff,
+        trend: diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat',
+        suffix: draft.format === 'percent' ? 'pt' : '',
+        label: compare === 'previous_year' ? 'vs previous year' : 'vs previous period',
+      }
+    }
     return {
       type: 'metric',
       title: draft.title,
@@ -154,6 +178,7 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
       value,
       label: draft.label ?? (measure ? short(measure) : draft.title),
       format: draft.format ?? 'number',
+      ...(delta ? { delta } : {}),
     }
   }
   if (draft.as === 'table') {
@@ -162,13 +187,22 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
       type: 'table',
       title: draft.title,
       w: 4,
-      columns: result.columns.map((c) => ({
-        key: c.key,
-        label: short(c.key),
-        align: c.kind === 'measure' ? 'right' : 'left',
-        kind: c.kind,
-        drillEntity: c.drill_entity,
-      })),
+      columns: result.columns.map((c) => {
+        const over = draft.columns?.[c.key]
+        return {
+          key: c.key,
+          label: over?.label ?? short(c.key),
+          align: c.kind === 'measure' ? 'right' : 'left',
+          kind: c.kind,
+          drillEntity: c.drill_entity,
+          // Measure columns inherit the widget's format ("50" → "50%"), and
+          // percent measures band into score pills unless overridden.
+          format: over?.format ?? (c.kind === 'measure' ? draft.format : undefined),
+          pill:
+            over?.pill ??
+            (c.kind === 'measure' && (over?.format ?? draft.format) === 'percent' ? 'band' : undefined),
+        }
+      }),
       rows: result.rows,
       total: result.total,
       truncatedAt: result.truncated_at,

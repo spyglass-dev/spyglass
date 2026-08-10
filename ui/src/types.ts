@@ -53,14 +53,21 @@ export interface MetricSpec extends WidgetBase {
   value: number | string
   label?: string
   format?: ValueFormat
-  delta?: { value: number; trend?: 'up' | 'down' | 'flat'; suffix?: string }
+  delta?: { value: number; trend?: 'up' | 'down' | 'flat'; suffix?: string; label?: string }
 }
+
+/** Pill tone for categorical cell values (status columns). */
+export type PillTone = 'positive' | 'warning' | 'negative' | 'neutral'
 
 export interface TableColumn {
   key: string
   label: string
   format?: ValueFormat
   align?: 'left' | 'right' | 'center'
+  /** Render cells as pills: `'band'` tones a percent value by score band
+   *  (≥75 green, ≥50 amber, below rose); a map assigns tones to categorical
+   *  values (e.g. a status column), unmapped values render neutral. */
+  pill?: 'band' | Record<string, PillTone>
   /** Result-column kind (`dimension` | `measure` | `time` | `label` | …) —
    *  what makes a cell drillable (dimensions drill, measures open row mode). */
   kind?: string

@@ -253,3 +253,66 @@ describe('humanizeMember', () => {
     expect(humanizeMember('Events.created_at')).toBe('Created at')
   })
 })
+
+describe('pills (mock-parity pass)', () => {
+  it('percent measures band into score pills automatically; overrides win', () => {
+    const spec = draftToWidgetSpec(
+      { as: 'table', format: 'percent', query: { measures: ['S.rate'], dimensions: ['S.status'] } },
+      {
+        columns: [
+          { key: 'S.status', kind: 'dimension' },
+          { key: 'S.rate', kind: 'measure' },
+        ],
+        rows: [{ 'S.status': 'graded', 'S.rate': 82 }],
+      },
+    ) as TableSpec
+    const rate = spec.columns.find((c) => c.key === 'S.rate')!
+    expect(rate.pill).toBe('band')
+    expect(rate.format).toBe('percent')
+  })
+
+  it('renders band tones by score and categorical tones from the column map', () => {
+    render(
+      <DataGrid
+        spec={{
+          type: 'table',
+          columns: [
+            { key: 'status', label: 'Status', pill: { graded: 'positive', overdue: 'negative' } },
+            { key: 'score', label: 'Score', format: 'percent', pill: 'band', align: 'right' },
+          ],
+          rows: [
+            { status: 'graded', score: 82 },
+            { status: 'overdue', score: 41 },
+          ],
+        }}
+      />,
+    )
+    expect(screen.getByText('82%')).toBeTruthy()
+    expect(screen.getByText('41%')).toBeTruthy()
+    expect(screen.getByText('graded')).toBeTruthy()
+  })
+})
+
+describe('metric delta from a comparison window (mock-parity pass)', () => {
+  it('builds the "vs previous period" chip from the __prev_ column', () => {
+    const spec = draftToWidgetSpec(
+      {
+        as: 'metric',
+        format: 'percent',
+        query: {
+          measures: ['S.rate'],
+          timeDimensions: [{ dimension: 'S.at', dateRange: ['a', 'b'], compare: 'previous_period' }],
+        },
+      },
+      {
+        columns: [{ key: 'S.rate', kind: 'measure' }],
+        rows: [{ 'S.rate': 42, '__prev_S.rate': 51.4 }],
+      },
+    )
+    expect(spec).toMatchObject({
+      type: 'metric',
+      value: 42,
+      delta: { value: -9.4, trend: 'down', suffix: 'pt', label: 'vs previous period' },
+    })
+  })
+})
