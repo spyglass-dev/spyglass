@@ -10,6 +10,9 @@
 //! - `today` · `yesterday`
 //! - `last N days|weeks|months|quarters|years` — the current period plus the
 //!   N−1 before it (so `last 30 days` includes today)
+//! - `next N days|weeks|months|quarters|years` — the current period plus the
+//!   N−1 after it (so `next 31 days` starts today; forward windows like
+//!   "trials ending in the next 31 days")
 //! - `this week|month|quarter|year` — the current calendar period
 //! - `previous week|month|quarter|year` (alias: `last <unit>` with no number)
 //! - `ytd` — start of the year through the end of today
@@ -111,6 +114,17 @@ pub fn resolve_relative(spec: &str, now: DateTime<Utc>, tz: Tz) -> Result<(Strin
                 shift_period_start(current, unit, 1),
             )
         }
+        // "next N <unit>" — the mirror of "last N": the current period plus
+        // the N−1 after it, so `next 31 days` starts today.
+        ["next", n, unit] => {
+            let n: i32 = n.parse().map_err(|_| unknown(spec))?;
+            if n < 1 {
+                return Err(unknown(spec));
+            }
+            let unit = parse_unit(unit).ok_or_else(|| unknown(spec))?;
+            let current = period_start(today, unit);
+            (current, shift_period_start(current, unit, n))
+        }
         _ => return Err(unknown(spec)),
     };
 
@@ -120,7 +134,8 @@ pub fn resolve_relative(spec: &str, now: DateTime<Utc>, tz: Tz) -> Result<(Strin
 fn unknown(spec: &str) -> String {
     format!(
         "unrecognized date range '{spec}' — accepted: today, yesterday, ytd, \
-         'last N days|weeks|months|quarters|years', 'this <unit>', 'previous <unit>'"
+         'last N days|weeks|months|quarters|years', 'next N <unit>', 'this <unit>', \
+         'previous <unit>'"
     )
 }
 
@@ -211,6 +226,23 @@ mod tests {
         let (from, to) = resolve_relative("last 30 days", at("2026-08-09T14:30:00Z"), chrono_tz::UTC).unwrap();
         assert_eq!(from, "2026-07-11T00:00:00+00:00");
         assert_eq!(to, "2026-08-10T00:00:00+00:00");
+    }
+
+    #[test]
+    fn next_n_days_starts_today() {
+        // The mirror of "last N days": a forward window that includes today.
+        let (from, to) = resolve_relative("next 31 days", at("2026-08-09T14:30:00Z"), chrono_tz::UTC).unwrap();
+        assert_eq!(from, "2026-08-09T00:00:00+00:00");
+        assert_eq!(to, "2026-09-09T00:00:00+00:00");
+    }
+
+    #[test]
+    fn next_n_months_is_calendar_aligned_and_next_0_is_rejected() {
+        let now = at("2026-08-09T14:30:00Z");
+        let (from, to) = resolve_relative("next 2 months", now, chrono_tz::UTC).unwrap();
+        assert_eq!((from.as_str(), to.as_str()), ("2026-08-01T00:00:00+00:00", "2026-10-01T00:00:00+00:00"));
+        assert!(resolve_relative("next 0 days", now, chrono_tz::UTC).is_err());
+        assert!(resolve_relative("next fortnight", now, chrono_tz::UTC).is_err());
     }
 
     #[test]
