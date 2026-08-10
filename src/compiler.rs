@@ -497,7 +497,7 @@ pub fn compile_values(
 
     let mut select = vec![format!("{} as {}", value_expr, quote("value"))];
     let mut group_by = vec![value_expr.clone()];
-    let mut columns = vec![Column { key: "value".into(), kind: "dimension".into() }];
+    let mut columns = vec![Column::new("value", "dimension")];
     let mut label_expr: Option<String> = None;
     if let Some(label) = &dim.label {
         let (label_cube, label_field) = if label.contains('.') {
@@ -509,11 +509,11 @@ pub fn compile_values(
         let (expr, _) = dimension_expr(label_cube, label_field, has_joins)?;
         select.push(format!("{} as {}", expr, quote("label")));
         group_by.push(expr.clone());
-        columns.push(Column { key: "label".into(), kind: "label".into() });
+        columns.push(Column::new("label", "label"));
         label_expr = Some(expr);
     }
     select.push(format!("count(*) as {}", quote("count")));
-    columns.push(Column { key: "count".into(), kind: "measure".into() });
+    columns.push(Column::new("count", "measure"));
 
     let mut params: Vec<ScalarValue> = Vec::new();
     let mut where_parts: Vec<String> = Vec::new();
@@ -695,7 +695,14 @@ pub fn compile_at(
         if !is_rows {
             group_by.push(expr);
         }
-        columns.push(Column { key: member.clone(), kind: "dimension".into() });
+        columns.push(Column {
+            key: member.clone(),
+            kind: "dimension".into(),
+            drill_entity: cube
+                .dimensions
+                .get(field)
+                .and_then(|d| d.drill.as_ref().map(|t| t.entity.clone())),
+        });
 
         if let Some(label) = cube.dimensions.get(field).and_then(|d| d.label.clone()) {
             let (label_cube, label_field) = if label.contains('.') {
@@ -710,7 +717,7 @@ pub fn compile_at(
             if !is_rows {
                 group_by.push(label_expr);
             }
-            columns.push(Column { key: alias, kind: "label".into() });
+            columns.push(Column::new(alias, "label"));
         }
     }
 
@@ -729,7 +736,7 @@ pub fn compile_at(
         if !is_rows {
             group_by.push(projected);
         }
-        columns.push(Column { key: td.dimension.clone(), kind: "time".into() });
+        columns.push(Column::new(td.dimension.clone(), "time"));
     }
 
     // Measures (aggregations) — always on the base cube, by construction.
@@ -737,7 +744,7 @@ pub fn compile_at(
         let (_, field) = split_member(member)?;
         let expr = measure_expr(base, field, has_joins)?;
         select.push(format!("{} as {}", expr, quote(member)));
-        columns.push(Column { key: member.clone(), kind: "measure".into() });
+        columns.push(Column::new(member.clone(), "measure"));
     }
 
     if select.is_empty() {
@@ -751,7 +758,7 @@ pub fn compile_at(
     // gap-filling, the total belongs on the OUTER query (it counts buckets).
     if query.include_total && !filling {
         select.push(format!("count(*) over () as {}", quote(TOTAL_ALIAS)));
-        columns.push(Column { key: TOTAL_ALIAS.into(), kind: "total".into() });
+        columns.push(Column::new(TOTAL_ALIAS, "total"));
     }
 
     // WHERE: user dimension filters, then time-dimension ranges, then
@@ -870,7 +877,7 @@ pub fn compile_at(
         }
         if query.include_total {
             outer.push(format!("count(*) over () as {}", quote(TOTAL_ALIAS)));
-            columns.push(Column { key: TOTAL_ALIAS.into(), kind: "total".into() });
+            columns.push(Column::new(TOTAL_ALIAS, "total"));
         }
         sql = format!(
             "select {}\nfrom generate_series(date_trunc('{trunc}', ${}::timestamptz), ${}::timestamptz - interval '{step}', interval '{step}') as gs(bucket)\nleft join (\n{sql}\n) as q on q.{alias} = gs.bucket::text",

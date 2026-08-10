@@ -225,3 +225,22 @@ describe('draftToWidgetSpec table paging state', () => {
     })
   })
 })
+
+describe('draftToWidgetSpec drill entity', () => {
+  it('maps the result column drill_entity onto TableColumn.drillEntity', () => {
+    const s = draftToWidgetSpec(
+      { as: 'table', query: { measures: ['Orders.revenue'], dimensions: ['Orders.customer_id', 'Orders.status'] } },
+      {
+        columns: [
+          { key: 'Orders.customer_id', kind: 'dimension', drill_entity: 'customer' },
+          { key: 'Orders.status', kind: 'dimension' },
+          { key: 'Orders.revenue', kind: 'measure' },
+        ],
+        rows: [],
+      },
+    )
+    if (s.type !== 'table') throw new Error('expected table')
+    expect(s.columns.find((c) => c.key === 'Orders.customer_id')?.drillEntity).toBe('customer')
+    expect(s.columns.find((c) => c.key === 'Orders.status')?.drillEntity).toBeUndefined()
+  })
+})

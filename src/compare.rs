@@ -19,10 +19,7 @@ pub fn merge_prev(
     time_key: Option<&str>,
 ) {
     for measure in measures {
-        current.columns.push(Column {
-            key: format!("{PREV_PREFIX}{measure}"),
-            kind: "prev_measure".into(),
-        });
+        current.columns.push(Column::new(format!("{PREV_PREFIX}{measure}"), "prev_measure"));
     }
 
     // Row indices of each side in time order (identity order when no buckets).
@@ -59,7 +56,7 @@ mod tests {
         QueryResult {
             columns: cols
                 .iter()
-                .map(|(k, kind)| Column { key: k.to_string(), kind: kind.to_string() })
+                .map(|(k, kind)| Column::new(*k, *kind))
                 .collect(),
             rows: rows.iter().map(|v| v.as_object().unwrap().clone()).collect(),
             sql: None,

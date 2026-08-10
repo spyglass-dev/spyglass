@@ -67,9 +67,11 @@ Drill belongs to the **model**, not the UI: cubes annotate dimensions with
 per-report wiring.
 
 - **Dimension cells emit `DrillEvent`** — `{ member, value, label?, entity? }`
-  (the label comes from the engine's `__label` projection). The host may
-  register a `DrillRouter` (`Record<entity, handler>`) on `ReportCanvas`;
-  routing is host policy, emitting is framework behavior.
+  (the label comes from the engine's `__label` projection; the entity from
+  the result column's `drill_entity`, which the engine stamps straight from
+  the dimension's `drill: { entity }` annotation — no client-side `/meta`
+  join). The host may register a `DrillRouter` (`Record<entity, handler>`)
+  on `ReportCanvas`; routing is host policy, emitting is framework behavior.
 - **With no router — or no route for the entity — the default is
   drill-DOWN**: the value becomes an `equals` filter, every widget whose cube
   shares the dimension re-runs in place, and a **poppable breadcrumb**

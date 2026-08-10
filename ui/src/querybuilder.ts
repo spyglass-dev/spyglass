@@ -86,7 +86,10 @@ export interface WidgetDraft {
 
 /** The shape a host's query runner returns (matches the engine's QueryResult). */
 export interface QueryResultLite {
-  columns: { key: string; kind: string }[]
+  /** `drill_entity` mirrors the dimension's `drill: { entity }` annotation —
+   *  the engine stamps it on result columns so tables become entity-drillable
+   *  without a client-side `/meta` join. */
+  columns: { key: string; kind: string; drill_entity?: string }[]
   rows: Record<string, unknown>[]
   /** Total matching rows/groups (present when the query asked `includeTotal`). */
   total?: number
@@ -146,6 +149,7 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
         label: short(c.key),
         align: c.kind === 'measure' ? 'right' : 'left',
         kind: c.kind,
+        drillEntity: c.drill_entity,
       })),
       rows: result.rows,
       total: result.total,
