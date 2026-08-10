@@ -163,6 +163,12 @@ numbers up top, then `chart` / `table` widgets, with `note`s for narrative.
 }
 ```
 
+On `ReportCanvas`, a host that passes `onEditWidget` gets an Edit affordance on
+**bound widgets and notes** — a note is authored prose (a summary, an
+annotation), so the host can offer a plain text editor for it rather than a
+query flow. Static data-bearing specs and views have nothing hand-editable and
+get no Edit button.
+
 ## Report filters: `applyFilters` returns a receipt
 
 Report-wide filters (a date range + facet selections) are merged into each

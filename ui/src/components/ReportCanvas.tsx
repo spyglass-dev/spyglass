@@ -263,7 +263,10 @@ export function ReportCanvas({
             <InsertBar onClick={onAddWidget} />
             {widgets.map((spec: WidgetSpec, i) => {
               const source = report.widgets[i]
-              const editable = onEditWidget && source?.type === 'bound'
+              // Bound widgets edit through the host's query flow; notes edit
+              // too — a report's prose (a summary, a teacher's note) is
+              // authored content, not derived data.
+              const editable = onEditWidget && (source?.type === 'bound' || source?.type === 'note')
               const showTitle = spec.title && spec.type !== 'metric'
               const skipped = spec.applied?.dateRangeSkipped
               return (
