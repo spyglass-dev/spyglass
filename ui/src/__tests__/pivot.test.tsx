@@ -275,3 +275,34 @@ describe('pivot options through the draft', () => {
     expect(s).toMatchObject({ type: 'pivot', totals: { row: ratio }, scale: 'sequential', empty: 'dash' })
   })
 })
+
+describe('pivot polish (mock parity)', () => {
+  const spec = {
+    type: 'pivot' as const,
+    rows: ['Sales.rep_id'],
+    cols: ['Sales.product_id'],
+    measure: 'Sales.rate',
+    format: 'percent' as const,
+    scale: 'diverging' as const,
+    totals: { row: 'avg' as const, col: 'avg' as const, rowLabel: 'Average', colLabel: 'Team average' },
+    data: [
+      { 'Sales.rep_id': 'r1', 'Sales.rep_id__label': 'Ada', 'Sales.product_id': 'p1', 'Sales.product_id__label': 'Widgets', 'Sales.rate': 80 },
+      { 'Sales.rep_id': 'r2', 'Sales.rep_id__label': 'Grace', 'Sales.product_id': 'p1', 'Sales.product_id__label': 'Widgets', 'Sales.rate': 40 },
+    ],
+  }
+
+  it('renders host-supplied edge labels instead of the generic Total/Avg', () => {
+    render(<Pivot spec={spec} />)
+    expect(screen.getByText('Average')).toBeTruthy()
+    expect(screen.getByText('Team average')).toBeTruthy()
+    expect(screen.queryByText('Avg')).toBeNull()
+  })
+
+  it('footers the axis counts in the dimension’s own words, plus the shading legend', () => {
+    render(<Pivot spec={spec} />)
+    expect(screen.getByText(/2 reps/)).toBeTruthy()
+    expect(screen.getByText(/1 product/)).toBeTruthy()
+    expect(screen.getByText(/shaded low → high/)).toBeTruthy()
+    expect(screen.getByText(/— no record/)).toBeTruthy()
+  })
+})

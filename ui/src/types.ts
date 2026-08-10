@@ -159,8 +159,10 @@ export interface PivotSpec extends WidgetBase {
    *  carry the numerator/denominator measures. */
   data: Record<string, unknown>[]
   /** Edge totals: `row` aggregates across a row (right edge), `col` down a
-   *  column (bottom edge). Absent = no totals. */
-  totals?: { row?: PivotTotal; col?: PivotTotal }
+   *  column (bottom edge). Absent = no totals. `rowLabel`/`colLabel` name the
+   *  edges in the domain's words (e.g. "Average" / "Class average") instead
+   *  of the generic Total/Avg. */
+  totals?: { row?: PivotTotal; col?: PivotTotal; rowLabel?: string; colLabel?: string }
   /** Cell shading (off by default). `sequential` ramps min→max; `diverging`
    *  splits around the midpoint. */
   scale?: 'none' | 'sequential' | 'diverging'

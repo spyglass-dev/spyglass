@@ -124,7 +124,22 @@ export function applyGridDelta(
   return next
 }
 
-const short = (member: string) => member.split('.').pop() ?? member
+/**
+ * Human header for a member key: last segment, trailing `_id` dropped (id
+ * columns render their `__label` companion anyway), snake_case to sentence
+ * case — `Scores.activity_id` → "Activity", `score_weighted` → "Score
+ * weighted". Raw `ACTIVITY_ID` headers were the loudest "unfinished" signal
+ * in the shipped tables.
+ */
+export function humanizeMember(member: string): string {
+  const field = member.split('.').pop() ?? member
+  const words = field.replace(/_id$/, '').split('_').filter(Boolean)
+  if (!words.length) return field
+  const text = words.join(' ')
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+const short = humanizeMember
 
 /** Turn a query result into a data-bearing WidgetSpec, per the draft's viz. */
 export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): WidgetSpec {
