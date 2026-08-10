@@ -182,10 +182,25 @@ annotation), so the host can offer a plain text editor for it rather than a
 query flow. Static data-bearing specs and views have nothing hand-editable and
 get no Edit button.
 
+### Pills and deltas
+
+- **Score pills**: a percent-format measure column bands into a tinted pill
+  (≥75 positive, ≥50 warning, below negative) automatically; a categorical
+  column takes `pill: { value: tone }` (e.g. a status column), with unmapped
+  values neutral. Per-member overrides ride `WidgetDraft.columns`.
+- **Metric deltas**: a widget declaring `filters.compare:
+  "previous_period" | "previous_year"` gets the engine's comparison window
+  over the report's active date range; the metric renders the
+  `__prev_<measure>` difference as a chip — "↓9.4pt vs previous period".
+
 ## Report filters: `applyFilters` returns a receipt
 
 Report-wide filters (a date range + facet selections) are merged into each
-bound widget's query by `applyFilters(widget, filters, cubeCaps)`. It returns
+bound widget's query by `applyFilters(widget, filters, cubeCaps)`. A widget
+whose query carries its own `timeDimensions.dateRange` (a template's stored
+default window) has it **replaced** by the report's range — the report filter
+is the user's word; intersecting the two silently shows the wrong window.
+`widget_pinned` remains for widgets that pin via explicit filters. It returns
 `{ query, applied }` — the merged query **and** which filters actually reached
 it:
 

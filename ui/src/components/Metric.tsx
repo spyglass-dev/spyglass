@@ -26,9 +26,12 @@ export function Metric({ spec }: { spec: MetricSpec }) {
         {formatValue(spec.value, spec.format)}
         {spec.delta && (
           <span style={{ fontSize: 12, fontWeight: 600, color: trendColor(spec.delta.trend) }}>
-            {spec.delta.value > 0 ? '+' : ''}
-            {spec.delta.value}
+            {spec.delta.trend === 'up' ? '↑' : spec.delta.trend === 'down' ? '↓' : ''}
+            {Math.abs(spec.delta.value)}
             {spec.delta.suffix ?? ''}
+            {spec.delta.label && (
+              <span style={{ fontWeight: 500, color: tokens.textMuted }}> {spec.delta.label}</span>
+            )}
           </span>
         )}
       </span>

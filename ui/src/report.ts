@@ -61,6 +61,10 @@ export interface WidgetFilterBinding {
   /** Time dimension the date range filters this widget on; `null` disables it.
    *  Defaults to the cube's default time field. */
   dateField?: string | null
+  /** Ask the engine for a comparison window over the report's date range —
+   *  `__prev_<measure>` columns come back, and a metric renders its delta
+   *  chip. Needs an active date range to compare against. */
+  compare?: 'previous_period' | 'previous_year'
 }
 
 /** Who authored a widget and from what ask — part of the doc, not a side
@@ -184,6 +188,7 @@ export function applyFilters(
 
   const range = resolveDateRange(filters)
   const dateField = widget.filters?.dateField === undefined ? cap.timeField : widget.filters.dateField
+  let nextTimeDimensions = query.timeDimensions
   if (range) {
     if (!dateField) {
       applied.dateRangeSkipped = widget.filters?.dateField === null ? 'opted_out' : 'no_time_field'
@@ -192,13 +197,35 @@ export function applyFilters(
       if (hasFilterOn(query, member)) {
         applied.dateRangeSkipped = 'widget_pinned'
       } else {
-        nextFilters.push({ member, operator: 'gte', values: [range[0]] })
-        nextFilters.push({ member, operator: 'lt', values: [range[1]] })
+        const compare = widget.filters?.compare
+        const tds = query.timeDimensions ?? []
+        const owned = tds.some((td) => td.dimension === member)
+        if (owned || compare) {
+          // The widget's own dateRange (a template's stored default window)
+          // is REPLACED, not intersected — the report filter is the user's
+          // word. Anything else shows 90 days under a "Last 30 days" bar
+          // with no marker: the fact-5 lie all over again. A declared
+          // `filters.compare` rides the same time dimension (the engine
+          // needs range + compare together to emit `__prev_` columns).
+          nextTimeDimensions = owned
+            ? tds.map((td) =>
+                td.dimension === member
+                  ? { ...td, dateRange: [range[0], range[1]] as [string, string], ...(compare ? { compare } : {}) }
+                  : td,
+              )
+            : [...tds, { dimension: member, dateRange: [range[0], range[1]] as [string, string], ...(compare ? { compare } : {}) }]
+        } else {
+          nextFilters.push({ member, operator: 'gte', values: [range[0]] })
+          nextFilters.push({ member, operator: 'lt', values: [range[1]] })
+        }
         applied.dateRange = member
       }
     }
   }
-  return { query: { ...query, filters: nextFilters }, applied }
+  return {
+    query: { ...query, filters: nextFilters, ...(nextTimeDimensions ? { timeDimensions: nextTimeDimensions } : {}) },
+    applied,
+  }
 }
 
 // ── Resolve ──────────────────────────────────────────────────────────────────

@@ -13,7 +13,7 @@
  * export of the loaded rows, and lightweight virtualization past ~200 rows.
  */
 import { useRef, useState, type CSSProperties } from 'react'
-import { formatValue, type TableSpec, type ValueFormat } from '../types'
+import { formatValue, type PillTone, type TableColumn, type TableSpec, type ValueFormat } from '../types'
 import type { DrillEvent } from '../drill'
 import { tokens } from '../tokens'
 
@@ -99,6 +99,42 @@ function formatCell(value: unknown, format?: ValueFormat): string {
   if (value == null) return '—'
   if (typeof value === 'number' || typeof value === 'string') return formatValue(value, format)
   return String(value)
+}
+
+const PILL_STYLES: Record<PillTone, CSSProperties> = {
+  positive: { background: 'rgba(34, 197, 94, 0.14)', color: '#15803d' },
+  warning: { background: tokens.warnBg, color: tokens.warnText },
+  negative: { background: 'rgba(225, 29, 72, 0.12)', color: '#be123c' },
+  neutral: { background: tokens.muted, color: tokens.textMuted },
+}
+
+/** Which tone a pill cell wears: score band for numbers, the column's map
+ *  for categorical values (unmapped → neutral). */
+function pillTone(raw: unknown, pill: NonNullable<TableColumn['pill']>): PillTone {
+  if (pill === 'band') {
+    const n = typeof raw === 'number' ? raw : Number(raw)
+    if (Number.isNaN(n)) return 'neutral'
+    return n >= 75 ? 'positive' : n >= 50 ? 'warning' : 'negative'
+  }
+  return pill[String(raw)] ?? 'neutral'
+}
+
+function PillCell({ raw, column }: { raw: unknown; column: TableColumn }) {
+  if (raw == null) return <>—</>
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        padding: '1px 8px',
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 600,
+        ...PILL_STYLES[pillTone(raw, column.pill!)],
+      }}
+    >
+      {formatCell(typeof raw === 'string' ? raw.replace(/_/g, ' ') : raw, column.format)}
+    </span>
+  )
 }
 
 const headerCell: CSSProperties = {
@@ -263,7 +299,7 @@ export function DataGrid({
                           : {}),
                       }}
                     >
-                      {formatCell(raw, c.format)}
+                      {c.pill ? <PillCell raw={raw} column={c} /> : formatCell(raw, c.format)}
                     </td>
                   )
                 })}
