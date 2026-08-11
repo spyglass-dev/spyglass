@@ -23,6 +23,8 @@ import {
   type QueryResultLite,
 } from './querybuilder'
 import { resolveDateRange, hasActiveFilters, type FilterFacet, type ReportFilters } from './filters'
+import { applyDrillTrail, type DrillTrail } from './drill'
+import { checkViewContract, type ViewRegistry } from './views'
 
 // ── Filter spec (declared filters) ───────────────────────────────────────────
 
@@ -59,6 +61,19 @@ export interface WidgetFilterBinding {
   /** Time dimension the date range filters this widget on; `null` disables it.
    *  Defaults to the cube's default time field. */
   dateField?: string | null
+  /** Ask the engine for a comparison window over the report's date range —
+   *  `__prev_<measure>` columns come back, and a metric renders its delta
+   *  chip. Needs an active date range to compare against. */
+  compare?: 'previous_period' | 'previous_year'
+}
+
+/** Who authored a widget and from what ask — part of the doc, not a side
+ *  channel. Surfaced in the Explain panel so "why is this number here" always
+ *  has an answer. */
+export interface Provenance {
+  prompt?: string
+  author: 'human' | 'agent'
+  at: number
 }
 
 /** A data widget bound to a query, plus its visualization + filter behavior. */
@@ -69,9 +84,24 @@ export interface BoundWidget extends WidgetDraft {
   /** Narrow this widget to one student (passed to the runner). */
   studentId?: string
   filters?: WidgetFilterBinding
+  provenance?: Provenance
 }
 
-export type ReportWidget = WidgetSpec | BoundWidget
+/** A view widget as AUTHORED: a registered host component + optional query.
+ *  Resolution runs the query under the report's filters + drill trail and
+ *  checks the manifest's contract; the result is a data-bearing `ViewSpec`. */
+export interface ViewWidget {
+  type: 'view'
+  component: string
+  query?: WidgetQuery
+  props?: Record<string, unknown>
+  title?: string
+  w?: WidgetWidth
+  filters?: WidgetFilterBinding
+  provenance?: Provenance
+}
+
+export type ReportWidget = WidgetSpec | BoundWidget | ViewWidget
 
 export interface Report {
   title: string
@@ -81,6 +111,9 @@ export interface Report {
   facets?: FacetSpec[]
   /** Selected filter values (date range + facet selections). */
   filters?: ReportFilters
+  /** The drill trail (default drill-down state) — each step filters every
+   *  widget whose cube has the dimension. Poppable via the breadcrumb. */
+  drill?: DrillTrail
 }
 
 /** Run a query against the host's engine. */
@@ -155,6 +188,7 @@ export function applyFilters(
 
   const range = resolveDateRange(filters)
   const dateField = widget.filters?.dateField === undefined ? cap.timeField : widget.filters.dateField
+  let nextTimeDimensions = query.timeDimensions
   if (range) {
     if (!dateField) {
       applied.dateRangeSkipped = widget.filters?.dateField === null ? 'opted_out' : 'no_time_field'
@@ -163,13 +197,35 @@ export function applyFilters(
       if (hasFilterOn(query, member)) {
         applied.dateRangeSkipped = 'widget_pinned'
       } else {
-        nextFilters.push({ member, operator: 'gte', values: [range[0]] })
-        nextFilters.push({ member, operator: 'lt', values: [range[1]] })
+        const compare = widget.filters?.compare
+        const tds = query.timeDimensions ?? []
+        const owned = tds.some((td) => td.dimension === member)
+        if (owned || compare) {
+          // The widget's own dateRange (a template's stored default window)
+          // is REPLACED, not intersected — the report filter is the user's
+          // word. Anything else shows 90 days under a "Last 30 days" bar
+          // with no marker: the fact-5 lie all over again. A declared
+          // `filters.compare` rides the same time dimension (the engine
+          // needs range + compare together to emit `__prev_` columns).
+          nextTimeDimensions = owned
+            ? tds.map((td) =>
+                td.dimension === member
+                  ? { ...td, dateRange: [range[0], range[1]] as [string, string], ...(compare ? { compare } : {}) }
+                  : td,
+              )
+            : [...tds, { dimension: member, dateRange: [range[0], range[1]] as [string, string], ...(compare ? { compare } : {}) }]
+        } else {
+          nextFilters.push({ member, operator: 'gte', values: [range[0]] })
+          nextFilters.push({ member, operator: 'lt', values: [range[1]] })
+        }
         applied.dateRange = member
       }
     }
   }
-  return { query: { ...query, filters: nextFilters }, applied }
+  return {
+    query: { ...query, filters: nextFilters, ...(nextTimeDimensions ? { timeDimensions: nextTimeDimensions } : {}) },
+    applied,
+  }
 }
 
 // ── Resolve ──────────────────────────────────────────────────────────────────
@@ -178,13 +234,18 @@ export interface ResolveOptions {
   runQuery: QueryRunner
   /** Report-wide filters (defaults to the report's own `filters`). */
   filters?: ReportFilters
+  /** Drill trail to apply (defaults to the report's own `drill`). */
+  drill?: DrillTrail
   /** Cube capabilities for filter application (none = no report filters). */
   cubeCaps?: CubeCapsMap
+  /** Host view registry — required to resolve `view` widgets. */
+  views?: ViewRegistry
   /** Map a raw error to a friendly one-liner for the error widget. */
   humanizeError?: (detail: string) => string
 }
 
 const isBound = (w: ReportWidget): w is BoundWidget => (w as BoundWidget).type === 'bound'
+const isView = (w: ReportWidget): w is ViewWidget => (w as ViewWidget).type === 'view'
 
 /** Resolve one bound widget into a data-bearing spec (honoring filters). The
  *  spec carries `applied` — which report filters reached the query — so a
@@ -194,9 +255,45 @@ export async function resolveBound(
   opts: ResolveOptions,
 ): Promise<WidgetSpec> {
   const { query, applied } = applyFilters(widget, opts.filters, opts.cubeCaps ?? {})
-  const result = await opts.runQuery(query, { studentId: widget.studentId })
-  const spec: WidgetSpec = { ...draftToWidgetSpec(widget, result), applied }
+  const cube = queryCube(query)
+  const drilled = opts.drill?.length
+    ? applyDrillTrail(query, opts.drill, cube, cube ? opts.cubeCaps?.[cube]?.dims : undefined)
+    : query
+  const result = await opts.runQuery(drilled, { studentId: widget.studentId })
+  const spec: WidgetSpec = { ...draftToWidgetSpec({ ...widget, query: drilled }, result), applied }
   return widget.w ? { ...spec, w: widget.w } : spec
+}
+
+/** Resolve one view widget: run its query under the report's filters + drill
+ *  trail, check the manifest's contract, and hand back a data-bearing
+ *  `ViewSpec`. An unknown component or an unmet contract sets `error` — the
+ *  frame renders `widget_error`, never a blank cell. */
+export async function resolveView(widget: ViewWidget, opts: ResolveOptions): Promise<WidgetSpec> {
+  const base: WidgetSpec = {
+    type: 'view',
+    component: widget.component,
+    title: widget.title,
+    w: widget.w,
+    props: widget.props,
+  }
+  const manifest = opts.views?.[widget.component]
+  if (!manifest) {
+    return { ...base, error: { message: `Unknown view \`${widget.component}\` — is it registered?` } }
+  }
+  if (!widget.query) {
+    const contractError = checkViewContract(manifest, { columns: [] })
+    return contractError ? { ...base, error: { message: contractError } } : base
+  }
+  const bound: BoundWidget = { type: 'bound', as: 'table', query: widget.query, filters: widget.filters }
+  const { query, applied } = applyFilters(bound, opts.filters, opts.cubeCaps ?? {})
+  const cube = queryCube(query)
+  const drilled = opts.drill?.length
+    ? applyDrillTrail(query, opts.drill, cube, cube ? opts.cubeCaps?.[cube]?.dims : undefined)
+    : query
+  const result = await opts.runQuery(drilled)
+  const contractError = checkViewContract(manifest, result)
+  if (contractError) return { ...base, applied, error: { message: contractError } }
+  return { ...base, applied, data: { rows: result.rows, columns: result.columns, total: result.total } }
 }
 
 /** Resolve a whole report into a renderable `ReportDoc`. A widget whose query
@@ -204,11 +301,27 @@ export async function resolveBound(
  *  the report (render it with a host `widget_error` renderer). */
 export async function resolveReport(report: Report, opts: ResolveOptions): Promise<ReportDoc> {
   const filters = opts.filters ?? report.filters
+  const drill = opts.drill ?? report.drill
   const widgets = await Promise.all(
     report.widgets.map(async (w): Promise<WidgetSpec> => {
+      if (isView(w)) {
+        try {
+          return await resolveView(w, { ...opts, filters, drill })
+        } catch (e) {
+          const detail = e instanceof Error ? e.message : String(e)
+          return {
+            type: 'view',
+            component: w.component,
+            title: w.title,
+            w: w.w,
+            props: w.props,
+            error: { message: opts.humanizeError?.(detail) ?? "Couldn't load this view's data.", detail },
+          }
+        }
+      }
       if (!isBound(w)) return w
       try {
-        return await resolveBound(w, { ...opts, filters })
+        return await resolveBound(w, { ...opts, filters, drill })
       } catch (e) {
         const detail = e instanceof Error ? e.message : String(e)
         return {
@@ -224,11 +337,42 @@ export async function resolveReport(report: Report, opts: ResolveOptions): Promi
   return { title: report.title, description: report.description, widgets }
 }
 
+/**
+ * The records query behind a measure click: the widget's fully-filtered scope
+ * (report filters + drill trail), narrowed to the clicked row's dimension
+ * values, switched to `mode: 'rows'`. The engine projects only the cube's
+ * `drill_members` — and REFUSES a cube that declares none — so this is
+ * PII-bounded by the model, not by the UI.
+ */
+export function rowsQueryFor(
+  widget: BoundWidget,
+  row: Record<string, unknown>,
+  opts: { filters?: ReportFilters; drill?: DrillTrail; cubeCaps?: CubeCapsMap },
+  limit = 50,
+): WidgetQuery {
+  const { query } = applyFilters(widget, opts.filters, opts.cubeCaps ?? {})
+  const cube = queryCube(query)
+  const drilled = opts.drill?.length
+    ? applyDrillTrail(query, opts.drill, cube, cube ? opts.cubeCaps?.[cube]?.dims : undefined)
+    : query
+  const filters: QueryFilter[] = [...(drilled.filters ?? [])]
+  for (const dim of drilled.dimensions ?? []) {
+    if (row[dim] === undefined) continue
+    filters.push({ member: dim, operator: 'equals', values: [row[dim] as string | number | boolean | null] })
+  }
+  return {
+    filters,
+    timeDimensions: drilled.timeDimensions,
+    mode: 'rows',
+    limit,
+  }
+}
+
 // ── Draft <-> bound widget ───────────────────────────────────────────────────
 
 export function widgetToDraft(b: BoundWidget): WidgetDraft {
-  const { as, query, title, label, format, mark, x, y } = b
-  return { as, query, title, label, format, mark, x, y }
+  const { as, query, title, label, format, mark, x, y, pivot } = b
+  return { as, query, title, label, format, mark, x, y, pivot }
 }
 export function draftToBound(draft: WidgetDraft, prev?: BoundWidget): BoundWidget {
   return {

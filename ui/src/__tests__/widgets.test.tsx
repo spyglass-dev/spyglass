@@ -53,3 +53,45 @@ describe('reporting widgets', () => {
     expect(screen.getByText(/Unknown widget/)).toBeTruthy()
   })
 })
+
+describe('ReportCanvas edit affordance', () => {
+  it('offers Edit on bound widgets AND notes — prose is authored content', async () => {
+    const report = {
+      title: 'r',
+      widgets: [
+        { type: 'note' as const, markdown: 'A teacher note.' },
+        { type: 'metric' as const, value: 3, label: 'static' },
+      ],
+    }
+    const { ReportCanvas } = await import('../components/ReportCanvas')
+    render(
+      <ReportCanvas
+        report={report}
+        onChange={() => {}}
+        runQuery={async () => ({ columns: [], rows: [] })}
+        onEditWidget={() => {}}
+      />,
+    )
+    await screen.findByText('A teacher note.')
+    // One Edit button: the note. The static metric spec gets none.
+    expect(screen.getAllByLabelText('Edit widget')).toHaveLength(1)
+  })
+})
+
+describe('note markdown subset', () => {
+  it('renders emphasis and headings instead of raw marker characters', () => {
+    render(
+      <Widget
+        spec={{
+          type: 'note',
+          markdown: '## Term summary\n\n_Amira_ has made **strong** progress with `haiku` form.',
+        }}
+      />,
+    )
+    expect(screen.getByText('Term summary')).toBeTruthy()
+    expect(screen.getByText('Amira').tagName).toBe('EM')
+    expect(screen.getByText('strong').tagName).toBe('STRONG')
+    expect(screen.getByText('haiku').tagName).toBe('CODE')
+    expect(screen.queryByText(/\*\*|_Amira_/)).toBeNull()
+  })
+})

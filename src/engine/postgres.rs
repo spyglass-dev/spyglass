@@ -27,6 +27,10 @@ pub struct PostgresEngine {
     /// rows, and a result that hits the cap is marked `truncated_at` — so a
     /// UI can tell a truncated table from a complete one.
     max_rows: Option<u32>,
+    /// Optional short-TTL result cache. The key includes the compiled SQL,
+    /// bound params, and the security scope — a cache that can return one
+    /// tenant's rows to another is worse than no cache.
+    cache: Option<super::ResultCache>,
 }
 
 /// Config for the row-level-security execution path.
@@ -43,7 +47,7 @@ impl PostgresEngine {
     /// Wrap an existing client (e.g. one the host already manages). No RLS path
     /// — the embedder owns connection management and applies its own scope.
     pub fn new(client: Client) -> Self {
-        Self { client, conn_str: None, rls: None, exporter: None, max_rows: None }
+        Self { client, conn_str: None, rls: None, exporter: None, max_rows: None, cache: None }
     }
 
     /// Attach a query-log exporter — every executed query is recorded.
@@ -58,6 +62,14 @@ impl PostgresEngine {
     /// looking complete.
     pub fn with_max_rows(mut self, max: u32) -> Self {
         self.max_rows = Some(max);
+        self
+    }
+
+    /// Cache query results in-process for `ttl`. Keys include SQL, params and
+    /// the scope; relative-date queries roll over naturally because the
+    /// resolved window lives in the params.
+    pub fn with_cache(mut self, ttl: std::time::Duration) -> Self {
+        self.cache = Some(super::ResultCache::new(ttl));
         self
     }
 
@@ -104,6 +116,7 @@ impl PostgresEngine {
             rls: None,
             exporter: None,
             max_rows: None,
+            cache: None,
         })
     }
 
@@ -158,6 +171,57 @@ impl PostgresEngine {
         // resolve against the SAME instant.
         let now = chrono::Utc::now();
         let compiled = crate::compiler::compile_at(model, query, ctx, now)?;
+
+        // Comparison window, compiled UP FRONT so the cache key covers it —
+        // a compare and a non-compare query share the current-window SQL and
+        // must never collide in the cache. Execution happens after the main
+        // fetch (and only on a cache miss).
+        let prev: Option<(usize, crate::compiler::Compiled)> = match query
+            .time_dimensions
+            .iter()
+            .enumerate()
+            .find(|(_, td)| td.compare.is_some())
+        {
+            Some((idx, td)) => {
+                let kind = td.compare.expect("guarded by find");
+                let tz = crate::dates::parse_tz(query.timezone.as_deref())
+                    .map_err(crate::compiler::CompileError::BadTimezone)?;
+                let range = td.date_range.as_ref().expect("compare validated to carry a range");
+                let (from, to) = crate::dates::resolve_date_range(range, now, tz)
+                    .map_err(crate::compiler::CompileError::BadDateRange)?;
+                let (prev_from, prev_to) = crate::dates::shift_window(&from, &to, kind)
+                    .map_err(crate::compiler::CompileError::BadDateRange)?;
+                let mut prev_query = query.clone();
+                prev_query.time_dimensions[idx].date_range =
+                    Some(crate::query::DateRange::Absolute([prev_from, prev_to]));
+                prev_query.time_dimensions[idx].compare = None;
+                prev_query.include_total = false;
+                Some((idx, crate::compiler::compile_at(model, &prev_query, ctx, now)?))
+            }
+            None => None,
+        };
+
+        // Cache: keyed on SQL + params + the prev window's SQL/params + the
+        // scope. Scope values already live in the params, but including the
+        // map is belt and braces — a wrong-tenant cache hit is the one bug
+        // this cache must never have. Relative windows expire naturally: the
+        // resolved instants are in the params, so midnight changes the key.
+        let cache_key = self.cache.as_ref().map(|_| {
+            serde_json::to_string(&(
+                &compiled.sql,
+                &compiled.params,
+                prev.as_ref().map(|(_, p)| (&p.sql, &p.params)),
+                &ctx.scope,
+                ctx.allow_unscoped,
+            ))
+            .unwrap_or_default()
+        });
+        if let (Some(cache), Some(key)) = (&self.cache, &cache_key) {
+            if let Some(hit) = cache.get_at(key, Instant::now()) {
+                return Ok(hit);
+            }
+        }
+
         let mut json_rows = self.fetch_json(&compiled.sql, &compiled.params, ctx).await?;
 
         // Pull the include_total window column out of the payload: it becomes
@@ -215,32 +279,12 @@ impl PostgresEngine {
             truncated_at,
         };
 
-        // Comparison window: run the SAME query over the shifted range and
-        // fold its measures in as `__prev_<measure>` columns. The compiler
-        // already validated the solo-time-grouping contract.
-        if let Some((idx, td)) = query
-            .time_dimensions
-            .iter()
-            .enumerate()
-            .find(|(_, td)| td.compare.is_some())
-        {
-            let kind = td.compare.expect("guarded by find");
-            let tz = crate::dates::parse_tz(query.timezone.as_deref())
-                .map_err(crate::compiler::CompileError::BadTimezone)?;
-            let range = td.date_range.as_ref().expect("compare validated to carry a range");
-            let (from, to) = crate::dates::resolve_date_range(range, now, tz)
-                .map_err(crate::compiler::CompileError::BadDateRange)?;
-            let (prev_from, prev_to) = crate::dates::shift_window(&from, &to, kind)
-                .map_err(crate::compiler::CompileError::BadDateRange)?;
-
-            let mut prev_query = query.clone();
-            prev_query.time_dimensions[idx].date_range =
-                Some(crate::query::DateRange::Absolute([prev_from, prev_to]));
-            prev_query.time_dimensions[idx].compare = None;
-            prev_query.include_total = false;
-            let prev_compiled = crate::compiler::compile_at(model, &prev_query, ctx, now)?;
+        // Comparison window: execute the shifted query compiled above and
+        // fold its measures in as `__prev_<measure>` columns.
+        if let Some((idx, prev_compiled)) = &prev {
+            let td = &query.time_dimensions[*idx];
             let prev_rows = self.fetch_json(&prev_compiled.sql, &prev_compiled.params, ctx).await?;
-            let prev = QueryResult {
+            let prev_result = QueryResult {
                 columns: Vec::new(),
                 rows: prev_rows,
                 sql: None,
@@ -249,10 +293,37 @@ impl PostgresEngine {
                 truncated_at: None,
             };
             let time_key = td.granularity.is_some().then(|| td.dimension.clone());
-            crate::compare::merge_prev(&mut result, &prev, &query.measures, time_key.as_deref());
+            crate::compare::merge_prev(&mut result, &prev_result, &query.measures, time_key.as_deref());
+        }
+
+        if let (Some(cache), Some(key)) = (&self.cache, cache_key) {
+            cache.put_at(key, result.clone(), Instant::now());
         }
 
         Ok(result)
+    }
+
+    /// The distinct-values query behind `/values`: scope-filtered,
+    /// label-resolved values of one `filterable: true` dimension, with
+    /// counts. Rows carry `value`, optional `label`, and `count`.
+    pub async fn values(
+        &self,
+        model: &Model,
+        member: &str,
+        search: Option<&str>,
+        limit: Option<u32>,
+        ctx: &SecurityContext,
+    ) -> Result<QueryResult, EngineError> {
+        let compiled = crate::compiler::compile_values(model, member, search, limit, ctx)?;
+        let rows = self.fetch_json(&compiled.sql, &compiled.params, ctx).await?;
+        Ok(QueryResult {
+            columns: compiled.columns,
+            rows,
+            sql: Some(compiled.sql),
+            total: None,
+            has_more: false,
+            truncated_at: None,
+        })
     }
 
     /// Bind params as TEXT and execute — shared by the main run and the

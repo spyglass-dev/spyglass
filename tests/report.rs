@@ -9,7 +9,7 @@ fn result(columns: &[(&str, &str)], rows: Vec<serde_json::Value>) -> QueryResult
     QueryResult {
         columns: columns
             .iter()
-            .map(|(key, kind)| Column { key: key.to_string(), kind: kind.to_string() })
+            .map(|(key, kind)| Column::new(*key, *kind))
             .collect(),
         rows: rows
             .into_iter()

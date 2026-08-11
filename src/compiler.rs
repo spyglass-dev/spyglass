@@ -70,6 +70,11 @@ pub enum CompileError {
     BadCompare(String),
     #[error("calculated-measure cycle through '{0}' — load-time validation should have caught this")]
     CalculatedCycle(String),
+    #[error(
+        "dimension '{0}' is not marked `filterable: true` — /values serves only the model's \
+         declared facet allowlist"
+    )]
+    NotFilterable(String),
 }
 
 /// A compiled, parameterized statement ready for an engine to execute.
@@ -461,9 +466,143 @@ fn normalize_rows_mode<'q>(
     Ok(Cow::Owned(normalized))
 }
 
+/// Compile the distinct-values query behind `/values`: scope-filtered,
+/// label-resolved values of one `filterable: true` dimension, with counts.
+/// Pure, like `compile` — and the same tenant rules apply: the dimension's
+/// cube (and its label's cube, when joined) must be scoped or the query is
+/// refused. The `filterable` flag is the allowlist: `/values` never serves a
+/// dimension the model didn't explicitly offer for filtering.
+pub fn compile_values(
+    model: &Model,
+    member: &str,
+    search: Option<&str>,
+    limit: Option<u32>,
+    ctx: &SecurityContext,
+) -> Result<Compiled, CompileError> {
+    let (_, field) = split_member(member)?;
+    // A synthetic single-dimension query drives join planning (the label's
+    // cube joins in automatically) and scope enforcement.
+    let synthetic = Query { dimensions: vec![member.to_string()], ..Default::default() };
+    let plan = plan_joins(model, &synthetic)?;
+    let cube = plan.base;
+    let dim = cube
+        .dimensions
+        .get(field)
+        .ok_or_else(|| CompileError::UnknownMember(member.to_string()))?;
+    if !dim.filterable {
+        return Err(CompileError::NotFilterable(member.to_string()));
+    }
+    let has_joins = plan.has_joins();
+    let (value_expr, _) = dimension_expr(cube, field, has_joins)?;
+
+    let mut select = vec![format!("{} as {}", value_expr, quote("value"))];
+    let mut group_by = vec![value_expr.clone()];
+    let mut columns = vec![Column::new("value", "dimension")];
+    let mut label_expr: Option<String> = None;
+    if let Some(label) = &dim.label {
+        let (label_cube, label_field) = if label.contains('.') {
+            let (_, f) = split_member(label)?;
+            (plan.cube_for(label)?, f)
+        } else {
+            (cube, label.as_str())
+        };
+        let (expr, _) = dimension_expr(label_cube, label_field, has_joins)?;
+        select.push(format!("{} as {}", expr, quote("label")));
+        group_by.push(expr.clone());
+        columns.push(Column::new("label", "label"));
+        label_expr = Some(expr);
+    }
+    select.push(format!("count(*) as {}", quote("count")));
+    columns.push(Column::new("count", "measure"));
+
+    let mut params: Vec<ScalarValue> = Vec::new();
+    let mut where_parts: Vec<String> = Vec::new();
+    // Typeahead search matches what the user SEES: the label when the
+    // dimension has one, the raw value otherwise.
+    if let Some(s) = search.map(str::trim).filter(|s| !s.is_empty()) {
+        let target = label_expr.as_deref().unwrap_or(&value_expr);
+        params.push(ScalarValue::String(format!("%{s}%")));
+        where_parts.push(format!("{}::text ilike ${}", target, params.len()));
+    }
+    apply_scope(&plan, ctx, has_joins, &mut params, &mut where_parts)?;
+
+    let mut sql = format!(
+        "select {}\nfrom {} as {}",
+        select.join(", "),
+        cube.from_source()
+            .ok_or_else(|| CompileError::NoSource(cube.name.clone()))?,
+        quote(&cube.name)
+    );
+    for (from, to, join) in &plan.edges {
+        let to_source = to
+            .from_source()
+            .ok_or_else(|| CompileError::NoSource(to.name.clone()))?;
+        sql.push_str(&format!(
+            "\nleft join {} as {} on {}",
+            to_source,
+            quote(&to.name),
+            join_condition(&join.sql, from, model)
+        ));
+    }
+    if !where_parts.is_empty() {
+        sql.push_str(&format!("\nwhere {}", where_parts.join(" and ")));
+    }
+    sql.push_str(&format!("\ngroup by {}", group_by.join(", ")));
+    sql.push_str(&format!("\norder by {} desc, {} asc", quote("count"), quote("value")));
+    sql.push_str(&format!("\nlimit {}", limit.unwrap_or(50).min(500)));
+
+    Ok(Compiled { sql, params, columns })
+}
+
 /// Compile without a clock. Absolute date ranges work as always; a RELATIVE
 /// range (`"last 30 days"`) is refused — resolution requires a clock, and the
 /// compiler never reads system time. Runtime callers use [`compile_at`].
+/// Enforce tenant scope for a planned query and append the scope predicates:
+/// fail closed for EVERY cube in the join tree (a joined tenant cube
+/// contributes its own predicate or the query is refused — the one place a
+/// join could quietly become a cross-tenant read), then bind the scope
+/// entries for every participating cube, sorted for deterministic SQL.
+/// Shared by `compile_at` and `compile_values`.
+fn apply_scope(
+    plan: &JoinPlan,
+    ctx: &SecurityContext,
+    has_joins: bool,
+    params: &mut Vec<ScalarValue>,
+    where_parts: &mut Vec<String>,
+) -> Result<(), CompileError> {
+    if !ctx.allow_unscoped {
+        for cube in plan.cubes() {
+            for (field, dim) in &cube.dimensions {
+                if dim.tenant && !ctx.scope.contains_key(&format!("{}.{}", cube.name, field)) {
+                    return Err(CompileError::MissingTenantScope {
+                        cube: cube.name.clone(),
+                        dimension: field.clone(),
+                    });
+                }
+            }
+        }
+    }
+    let participating: Vec<&Cube> = plan.cubes();
+    let mut scope: Vec<(&String, &ScalarValue)> = ctx
+        .scope
+        .iter()
+        .filter(|(member, _)| {
+            split_member(member)
+                .map(|(c, _)| participating.iter().any(|cube| cube.name == c))
+                .unwrap_or(false)
+        })
+        .collect();
+    scope.sort_by(|a, b| a.0.cmp(b.0));
+    for (member, value) in scope {
+        let (_, field) = split_member(member)?;
+        let cube = plan.cube_for(member)?;
+        let (expr, dt) = dimension_expr(cube, field, has_joins)?;
+        params.push(value.clone());
+        where_parts.push(format!("{} = {}", expr, placeholder(params.len(), dt)));
+    }
+    Ok(())
+}
+
 pub fn compile(
     model: &Model,
     query: &Query,
@@ -556,7 +695,14 @@ pub fn compile_at(
         if !is_rows {
             group_by.push(expr);
         }
-        columns.push(Column { key: member.clone(), kind: "dimension".into() });
+        columns.push(Column {
+            key: member.clone(),
+            kind: "dimension".into(),
+            drill_entity: cube
+                .dimensions
+                .get(field)
+                .and_then(|d| d.drill.as_ref().map(|t| t.entity.clone())),
+        });
 
         if let Some(label) = cube.dimensions.get(field).and_then(|d| d.label.clone()) {
             let (label_cube, label_field) = if label.contains('.') {
@@ -571,7 +717,7 @@ pub fn compile_at(
             if !is_rows {
                 group_by.push(label_expr);
             }
-            columns.push(Column { key: alias, kind: "label".into() });
+            columns.push(Column::new(alias, "label"));
         }
     }
 
@@ -590,7 +736,7 @@ pub fn compile_at(
         if !is_rows {
             group_by.push(projected);
         }
-        columns.push(Column { key: td.dimension.clone(), kind: "time".into() });
+        columns.push(Column::new(td.dimension.clone(), "time"));
     }
 
     // Measures (aggregations) — always on the base cube, by construction.
@@ -598,7 +744,7 @@ pub fn compile_at(
         let (_, field) = split_member(member)?;
         let expr = measure_expr(base, field, has_joins)?;
         select.push(format!("{} as {}", expr, quote(member)));
-        columns.push(Column { key: member.clone(), kind: "measure".into() });
+        columns.push(Column::new(member.clone(), "measure"));
     }
 
     if select.is_empty() {
@@ -612,7 +758,7 @@ pub fn compile_at(
     // gap-filling, the total belongs on the OUTER query (it counts buckets).
     if query.include_total && !filling {
         select.push(format!("count(*) over () as {}", quote(TOTAL_ALIAS)));
-        columns.push(Column { key: TOTAL_ALIAS.into(), kind: "total".into() });
+        columns.push(Column::new(TOTAL_ALIAS, "total"));
     }
 
     // WHERE: user dimension filters, then time-dimension ranges, then
@@ -667,44 +813,7 @@ pub fn compile_at(
             }
         }
     }
-    // Fail closed for EVERY cube in the join tree, not just the base: a
-    // joined tenant cube contributes its own scope predicate or the query is
-    // refused. This is the one place a join could quietly become a
-    // cross-tenant read. Admin/offline callers opt out explicitly.
-    if !ctx.allow_unscoped {
-        for cube in plan.cubes() {
-            for (field, dim) in &cube.dimensions {
-                if dim.tenant && !ctx.scope.contains_key(&format!("{}.{}", cube.name, field)) {
-                    return Err(CompileError::MissingTenantScope {
-                        cube: cube.name.clone(),
-                        dimension: field.clone(),
-                    });
-                }
-            }
-        }
-    }
-
-    // Mandatory scope filters — the entries for every participating cube (the
-    // scope is a model-wide map keyed by `Cube.member`). Sorted for
-    // deterministic SQL.
-    let participating: Vec<&Cube> = plan.cubes();
-    let mut scope: Vec<(&String, &ScalarValue)> = ctx
-        .scope
-        .iter()
-        .filter(|(member, _)| {
-            split_member(member)
-                .map(|(c, _)| participating.iter().any(|cube| cube.name == c))
-                .unwrap_or(false)
-        })
-        .collect();
-    scope.sort_by(|a, b| a.0.cmp(b.0));
-    for (member, value) in scope {
-        let (_, field) = split_member(member)?;
-        let cube = plan.cube_for(member)?;
-        let (expr, dt) = dimension_expr(cube, field, has_joins)?;
-        params.push(value.clone());
-        where_parts.push(format!("{} = {}", expr, placeholder(params.len(), dt)));
-    }
+    apply_scope(&plan, ctx, has_joins, &mut params, &mut where_parts)?;
 
     // HAVING: measure filters, compiled against the aggregate expression.
     // This is what makes "the worst N" buildable. Compiled last so the bind
@@ -768,7 +877,7 @@ pub fn compile_at(
         }
         if query.include_total {
             outer.push(format!("count(*) over () as {}", quote(TOTAL_ALIAS)));
-            columns.push(Column { key: TOTAL_ALIAS.into(), kind: "total".into() });
+            columns.push(Column::new(TOTAL_ALIAS, "total"));
         }
         sql = format!(
             "select {}\nfrom generate_series(date_trunc('{trunc}', ${}::timestamptz), ${}::timestamptz - interval '{step}', interval '{step}') as gs(bucket)\nleft join (\n{sql}\n) as q on q.{alias} = gs.bucket::text",

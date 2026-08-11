@@ -164,3 +164,35 @@ cubes:
     assert!(format!("{err}").contains("join target 'Customers'"), "got: {err}");
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn result_columns_carry_the_dimension_drill_entity() {
+    // The model's `drill: { entity }` annotation surfaces on RESULT columns
+    // too — a consumer can wire entity navigation from the result alone,
+    // without re-joining `/meta` client-side.
+    let m = parse_str(
+        r#"
+cubes:
+  Orders:
+    sql_table: orders
+    dimensions:
+      customer_id: { type: string, sql: customer_id, drill: { entity: customer } }
+      status: { type: string, sql: status }
+    measures:
+      count: { type: count }
+"#,
+        "t.yml",
+    )
+    .unwrap();
+    let query = Query {
+        measures: vec!["Orders.count".into()],
+        dimensions: vec!["Orders.customer_id".into(), "Orders.status".into()],
+        ..Default::default()
+    };
+    let compiled = spyglass::compile(&m, &query, &SecurityContext::default().allow_unscoped())
+        .expect("drill-annotated query compiles");
+    let col = |k: &str| compiled.columns.iter().find(|c| c.key == k).expect(k);
+    assert_eq!(col("Orders.customer_id").drill_entity.as_deref(), Some("customer"));
+    assert_eq!(col("Orders.status").drill_entity, None);
+    assert_eq!(col("Orders.count").drill_entity, None);
+}

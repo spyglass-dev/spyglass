@@ -92,3 +92,38 @@ describe('resolveBound — applied metadata reaches the resolved spec', () => {
     expect(ok.applied?.dateRangeSkipped).toBeUndefined()
   })
 })
+
+describe('the report range REPLACES a widget-owned window (mock-parity pass)', () => {
+  it('overrides the widget’s own dateRange instead of intersecting beside it', () => {
+    const w = widget({
+      measures: ['Orders.count'],
+      timeDimensions: [
+        { dimension: 'Orders.created_at', granularity: 'week', dateRange: ['2020-01-01', '2020-03-31'] },
+      ],
+    })
+    const out = applyFilters(w, { dateFrom: '2026-07-11', dateTo: '2026-08-10' }, CAPS)
+    const td = out.query.timeDimensions![0]
+    expect(td.dateRange).toEqual(['2026-07-11', '2026-08-10'])
+    expect(td.granularity).toBe('week')
+    expect(out.query.filters ?? []).toEqual([])
+    expect(out.applied.dateRange).toBe('Orders.created_at')
+    expect(out.applied.dateRangeSkipped).toBeUndefined()
+  })
+
+  it('filters.compare rides the range as a comparison window on the time dimension', () => {
+    const w = widget({ measures: ['Orders.count'] }, { filters: { compare: 'previous_period' } })
+    const out = applyFilters(w, { datePreset: 'last_30d' }, CAPS)
+    const td = out.query.timeDimensions![0]
+    expect(td.dimension).toBe('Orders.created_at')
+    expect(td.compare).toBe('previous_period')
+    expect(td.dateRange).toBeDefined()
+    // No parallel gte/lt filters — one source of truth for the window.
+    expect(out.query.filters ?? []).toEqual([])
+  })
+
+  it('no active range → no comparison window (nothing to compare against)', () => {
+    const w = widget({ measures: ['Orders.count'] }, { filters: { compare: 'previous_period' } })
+    const out = applyFilters(w, {}, CAPS)
+    expect(out.query.timeDimensions).toBeUndefined()
+  })
+})

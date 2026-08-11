@@ -129,3 +129,35 @@ const charts: ReportDoc = {
 export const ChartGallery = {
   render: () => <ReportView doc={charts} />,
 }
+
+/** The "all time" marker: widgets an active date range could not reach say so
+ *  right on the frame — beside widgets it did reach — instead of silently
+ *  presenting two different time windows as one report. */
+const allTime: ReportDoc = {
+  title: 'Ranged report with unreachable widgets',
+  description: 'Date range: last 30 days. Two widgets cannot receive it and are marked.',
+  widgets: [
+    { type: 'metric', value: 30924, label: 'Revenue (30d)', format: 'currency', w: 1, applied: { facets: [], dateRange: 'Payments.paid_at' } },
+    { type: 'metric', value: 599, label: 'Customers', format: 'number', w: 1, applied: { facets: [], dateRangeSkipped: 'no_time_field' } },
+    { type: 'metric', value: 1204, label: 'Lifetime rentals', format: 'number', w: 1, applied: { facets: [], dateRangeSkipped: 'opted_out' } },
+    { type: 'metric', value: 87, label: 'Avg basket', format: 'currency', w: 1, applied: { facets: [], dateRange: 'Payments.paid_at' } },
+    {
+      type: 'table',
+      title: 'Rentals this quarter',
+      w: 4,
+      applied: { facets: [], dateRangeSkipped: 'widget_pinned' },
+      columns: [
+        { key: 'film', label: 'Film' },
+        { key: 'rentals', label: 'Rentals', align: 'right' },
+      ],
+      rows: [
+        { film: 'Bucket Brotherhood', rentals: 34 },
+        { film: 'Scalawag Duck', rentals: 32 },
+      ],
+    },
+  ],
+}
+
+export const AllTimeMarkers = {
+  render: () => <ReportView doc={allTime} />,
+}

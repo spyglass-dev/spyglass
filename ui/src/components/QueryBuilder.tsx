@@ -19,6 +19,7 @@ const VIZ: { value: WidgetDraft['as']; label: string }[] = [
   { value: 'metric', label: 'Metric' },
   { value: 'table', label: 'Table' },
   { value: 'chart', label: 'Chart' },
+  { value: 'pivot', label: 'Pivot' },
 ]
 const MARKS: WidgetDraft['mark'][] = ['bar', 'line', 'area', 'point']
 
@@ -112,6 +113,11 @@ export function QueryBuilder({
                   {m}
                 </Chip>
               ))}
+            </div>
+          )}
+          {value.as === 'pivot' && (
+            <div className="mt-1 text-xs text-muted-foreground">
+              First group-by → rows, second → columns, first measure → cells.
             </div>
           )}
         </Field>

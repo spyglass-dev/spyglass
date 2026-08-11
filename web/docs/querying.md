@@ -121,6 +121,8 @@ saved document stores the *intent* and the window moves:
 
 Grammar: `today` · `yesterday` · `ytd` · `last N days|weeks|months|quarters|years`
 (the current period plus the N−1 before it, so `last 30 days` includes today)
+· `next N <unit>` (the mirror — the current period plus the N−1 after it, so
+`next 31 days` starts today; forward windows like "trials ending soon")
 · `this week|month|quarter|year` · `previous <unit>` (`last <unit>` with no
 number means the same). Periods are calendar-aligned in the query's
 `timezone` (IANA name, default UTC); weeks start on Monday (ISO). An
@@ -204,6 +206,30 @@ Two refusals are guarantees, not gaps:
 - `MissingTenantScope` — *any* cube in the join tree declares a tenant
   dimension the `SecurityContext` has no scope for. Joins never widen tenant
   access.
+
+## Batch queries, `/values`, and the result cache
+
+- **Batch**: `POST /query { "queries": [Query, …], "scope": … }` runs every
+  query in one request over one connection — a 12-widget report is one round
+  trip instead of 12. The response is `{ "results": [...] }` with one entry
+  per query: a `QueryResult`, or `{ "error": … }` for that query alone — one
+  bad widget must not blank the other eleven. The single-query form
+  (`{ "query": … }`) is unchanged.
+- **`POST /values { member, search?, limit?, scope }`** returns
+  `{ "values": [{ value, label?, count }] }` — scope-filtered, label-resolved
+  distinct values of a dimension marked
+  [`filterable: true`](./cube-format.md#curation). The flag is the allowlist:
+  `/values` never serves a dimension the model didn't explicitly offer for
+  filtering. Search matches what the user *sees* (the label when the
+  dimension has one); results order by count descending; limit defaults to
+  50, capped at 500. Tenant scope is enforced exactly as for `/query`,
+  label-join cubes included.
+- **Result cache**: `SPYGLASS_CACHE_TTL_MS` (or `with_cache(ttl)` when
+  embedding) enables a short-TTL in-process cache. The key includes the
+  compiled SQL, bound params, any comparison window, **and the tenant
+  scope** — a cache that can return one tenant's rows to another is worse
+  than no cache. Relative date windows roll over naturally because the
+  resolved instants live in the params.
 
 ## Compiler guarantees
 
