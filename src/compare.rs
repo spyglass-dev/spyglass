@@ -19,7 +19,10 @@ pub fn merge_prev(
     time_key: Option<&str>,
 ) {
     for measure in measures {
-        current.columns.push(Column::new(format!("{PREV_PREFIX}{measure}"), "prev_measure"));
+        current.columns.push(Column::new(
+            format!("{PREV_PREFIX}{measure}"),
+            "prev_measure",
+        ));
     }
 
     // Row indices of each side in time order (identity order when no buckets).
@@ -27,7 +30,11 @@ pub fn merge_prev(
         let mut idx: Vec<usize> = (0..rows.len()).collect();
         if let Some(key) = time_key {
             idx.sort_by_key(|&i| {
-                rows[i].get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
+                rows[i]
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
             });
         }
         idx
@@ -58,7 +65,10 @@ mod tests {
                 .iter()
                 .map(|(k, kind)| Column::new(*k, *kind))
                 .collect(),
-            rows: rows.iter().map(|v| v.as_object().unwrap().clone()).collect(),
+            rows: rows
+                .iter()
+                .map(|v| v.as_object().unwrap().clone())
+                .collect(),
             sql: None,
             total: None,
             has_more: false,
@@ -68,11 +78,20 @@ mod tests {
 
     #[test]
     fn metric_merge_is_a_single_row_zip() {
-        let mut cur = result(&[("Orders.count", "measure")], &[json!({"Orders.count": 42})]);
-        let prev = result(&[("Orders.count", "measure")], &[json!({"Orders.count": 30})]);
+        let mut cur = result(
+            &[("Orders.count", "measure")],
+            &[json!({"Orders.count": 42})],
+        );
+        let prev = result(
+            &[("Orders.count", "measure")],
+            &[json!({"Orders.count": 30})],
+        );
         merge_prev(&mut cur, &prev, &["Orders.count".into()], None);
         assert_eq!(cur.rows[0]["__prev_Orders.count"], json!(30));
-        assert!(cur.columns.iter().any(|c| c.key == "__prev_Orders.count" && c.kind == "prev_measure"));
+        assert!(cur
+            .columns
+            .iter()
+            .any(|c| c.key == "__prev_Orders.count" && c.kind == "prev_measure"));
     }
 
     #[test]

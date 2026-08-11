@@ -246,6 +246,10 @@ pub struct Column {
 
 impl Column {
     pub fn new(key: impl Into<String>, kind: impl Into<String>) -> Self {
-        Self { key: key.into(), kind: kind.into(), drill_entity: None }
+        Self {
+            key: key.into(),
+            kind: kind.into(),
+            drill_entity: None,
+        }
     }
 }

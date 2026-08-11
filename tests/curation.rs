@@ -29,11 +29,19 @@ cubes:
 fn curated_fields_flow_into_meta() {
     let meta = model().metadata();
     let orders = &meta.cubes[0];
-    let count = orders.measures.iter().find(|m| m.name == "count").expect("count");
+    let count = orders
+        .measures
+        .iter()
+        .find(|m| m.name == "count")
+        .expect("count");
     assert_eq!(count.description.as_deref(), Some("Number of orders."));
     assert!(count.featured);
     assert_eq!(count.unit.as_deref(), Some("orders"));
-    let status = orders.dimensions.iter().find(|d| d.name == "status").expect("status");
+    let status = orders
+        .dimensions
+        .iter()
+        .find(|d| d.name == "status")
+        .expect("status");
     assert_eq!(status.description.as_deref(), Some("Fulfilment state."));
     assert!(status.featured);
     assert!(status.filterable);
@@ -45,7 +53,10 @@ fn hidden_members_are_omitted_from_meta_but_stay_queryable() {
     let meta = m.metadata();
     let orders = &meta.cubes[0];
     assert!(
-        !orders.measures.iter().any(|x| x.name == "internal_checksum"),
+        !orders
+            .measures
+            .iter()
+            .any(|x| x.name == "internal_checksum"),
         "hidden measure must not appear in the catalog"
     );
     assert!(
@@ -112,9 +123,18 @@ cubes:
     .unwrap();
     let problems = m.validate().expect_err("invalid model must fail");
     let text = problems.join("\n");
-    assert!(text.contains("join target 'Ghost'"), "missing join problem: {text}");
-    assert!(text.contains("Customers.missing_name"), "missing label problem: {text}");
-    assert!(text.contains("'not_a_dimension'"), "missing drill-member problem: {text}");
+    assert!(
+        text.contains("join target 'Ghost'"),
+        "missing join problem: {text}"
+    );
+    assert!(
+        text.contains("Customers.missing_name"),
+        "missing label problem: {text}"
+    );
+    assert!(
+        text.contains("'not_a_dimension'"),
+        "missing drill-member problem: {text}"
+    );
     // count's drill_members: [customer_id] widens the cube's [status, not_a_dimension].
     assert!(
         text.contains("never widen"),
@@ -161,7 +181,10 @@ cubes:
     // Remove the Customers file: the same Orders cube now fails to load.
     std::fs::remove_file(dir.join("b_customers.yml")).unwrap();
     let err = spyglass::loader::load_dir(&dir).expect_err("dangling join must fail load");
-    assert!(format!("{err}").contains("join target 'Customers'"), "got: {err}");
+    assert!(
+        format!("{err}").contains("join target 'Customers'"),
+        "got: {err}"
+    );
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -192,7 +215,10 @@ cubes:
     let compiled = spyglass::compile(&m, &query, &SecurityContext::default().allow_unscoped())
         .expect("drill-annotated query compiles");
     let col = |k: &str| compiled.columns.iter().find(|c| c.key == k).expect(k);
-    assert_eq!(col("Orders.customer_id").drill_entity.as_deref(), Some("customer"));
+    assert_eq!(
+        col("Orders.customer_id").drill_entity.as_deref(),
+        Some("customer")
+    );
     assert_eq!(col("Orders.status").drill_entity, None);
     assert_eq!(col("Orders.count").drill_entity, None);
 }

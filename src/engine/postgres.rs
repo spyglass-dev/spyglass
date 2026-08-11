@@ -47,7 +47,14 @@ impl PostgresEngine {
     /// Wrap an existing client (e.g. one the host already manages). No RLS path
     /// — the embedder owns connection management and applies its own scope.
     pub fn new(client: Client) -> Self {
-        Self { client, conn_str: None, rls: None, exporter: None, max_rows: None, cache: None }
+        Self {
+            client,
+            conn_str: None,
+            rls: None,
+            exporter: None,
+            max_rows: None,
+            cache: None,
+        }
     }
 
     /// Attach a query-log exporter — every executed query is recorded.
@@ -82,8 +89,15 @@ impl PostgresEngine {
     pub fn with_rls_guc(mut self, guc: impl Into<String>) -> Self {
         let guc = guc.into();
         match &self.conn_str {
-            Some(conn_str) => self.rls = Some(RlsConfig { conn_str: conn_str.clone(), guc }),
-            None => eprintln!("with_rls_guc ignored: engine has no connection string (built via new())"),
+            Some(conn_str) => {
+                self.rls = Some(RlsConfig {
+                    conn_str: conn_str.clone(),
+                    guc,
+                })
+            }
+            None => {
+                eprintln!("with_rls_guc ignored: engine has no connection string (built via new())")
+            }
         }
         self
     }
@@ -186,7 +200,10 @@ impl PostgresEngine {
                 let kind = td.compare.expect("guarded by find");
                 let tz = crate::dates::parse_tz(query.timezone.as_deref())
                     .map_err(crate::compiler::CompileError::BadTimezone)?;
-                let range = td.date_range.as_ref().expect("compare validated to carry a range");
+                let range = td
+                    .date_range
+                    .as_ref()
+                    .expect("compare validated to carry a range");
                 let (from, to) = crate::dates::resolve_date_range(range, now, tz)
                     .map_err(crate::compiler::CompileError::BadDateRange)?;
                 let (prev_from, prev_to) = crate::dates::shift_window(&from, &to, kind)
@@ -196,7 +213,10 @@ impl PostgresEngine {
                     Some(crate::query::DateRange::Absolute([prev_from, prev_to]));
                 prev_query.time_dimensions[idx].compare = None;
                 prev_query.include_total = false;
-                Some((idx, crate::compiler::compile_at(model, &prev_query, ctx, now)?))
+                Some((
+                    idx,
+                    crate::compiler::compile_at(model, &prev_query, ctx, now)?,
+                ))
             }
             None => None,
         };
@@ -222,7 +242,9 @@ impl PostgresEngine {
             }
         }
 
-        let mut json_rows = self.fetch_json(&compiled.sql, &compiled.params, ctx).await?;
+        let mut json_rows = self
+            .fetch_json(&compiled.sql, &compiled.params, ctx)
+            .await?;
 
         // Pull the include_total window column out of the payload: it becomes
         // `total` on the result, never a visible column.
@@ -283,7 +305,9 @@ impl PostgresEngine {
         // fold its measures in as `__prev_<measure>` columns.
         if let Some((idx, prev_compiled)) = &prev {
             let td = &query.time_dimensions[*idx];
-            let prev_rows = self.fetch_json(&prev_compiled.sql, &prev_compiled.params, ctx).await?;
+            let prev_rows = self
+                .fetch_json(&prev_compiled.sql, &prev_compiled.params, ctx)
+                .await?;
             let prev_result = QueryResult {
                 columns: Vec::new(),
                 rows: prev_rows,
@@ -293,7 +317,12 @@ impl PostgresEngine {
                 truncated_at: None,
             };
             let time_key = td.granularity.is_some().then(|| td.dimension.clone());
-            crate::compare::merge_prev(&mut result, &prev_result, &query.measures, time_key.as_deref());
+            crate::compare::merge_prev(
+                &mut result,
+                &prev_result,
+                &query.measures,
+                time_key.as_deref(),
+            );
         }
 
         if let (Some(cache), Some(key)) = (&self.cache, cache_key) {
@@ -315,7 +344,9 @@ impl PostgresEngine {
         ctx: &SecurityContext,
     ) -> Result<QueryResult, EngineError> {
         let compiled = crate::compiler::compile_values(model, member, search, limit, ctx)?;
-        let rows = self.fetch_json(&compiled.sql, &compiled.params, ctx).await?;
+        let rows = self
+            .fetch_json(&compiled.sql, &compiled.params, ctx)
+            .await?;
         Ok(QueryResult {
             columns: compiled.columns,
             rows,
@@ -418,18 +449,48 @@ fn row_to_json(row: &Row) -> serde_json::Map<String, serde_json::Value> {
 fn cell_to_json(row: &Row, i: usize, ty: &Type) -> serde_json::Value {
     use serde_json::Value;
     match *ty {
-        Type::BOOL => opt(row.try_get::<_, Option<bool>>(i).ok().flatten().map(Value::from)),
-        Type::INT2 => opt(row.try_get::<_, Option<i16>>(i).ok().flatten().map(|v| Value::from(v as i64))),
-        Type::INT4 => opt(row.try_get::<_, Option<i32>>(i).ok().flatten().map(|v| Value::from(v as i64))),
-        Type::INT8 => opt(row.try_get::<_, Option<i64>>(i).ok().flatten().map(Value::from)),
-        Type::FLOAT4 => opt(row.try_get::<_, Option<f32>>(i).ok().flatten().map(|v| Value::from(v as f64))),
-        Type::FLOAT8 => opt(row.try_get::<_, Option<f64>>(i).ok().flatten().map(Value::from)),
-        Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME => {
-            opt(row.try_get::<_, Option<String>>(i).ok().flatten().map(Value::from))
-        }
+        Type::BOOL => opt(row
+            .try_get::<_, Option<bool>>(i)
+            .ok()
+            .flatten()
+            .map(Value::from)),
+        Type::INT2 => opt(row
+            .try_get::<_, Option<i16>>(i)
+            .ok()
+            .flatten()
+            .map(|v| Value::from(v as i64))),
+        Type::INT4 => opt(row
+            .try_get::<_, Option<i32>>(i)
+            .ok()
+            .flatten()
+            .map(|v| Value::from(v as i64))),
+        Type::INT8 => opt(row
+            .try_get::<_, Option<i64>>(i)
+            .ok()
+            .flatten()
+            .map(Value::from)),
+        Type::FLOAT4 => opt(row
+            .try_get::<_, Option<f32>>(i)
+            .ok()
+            .flatten()
+            .map(|v| Value::from(v as f64))),
+        Type::FLOAT8 => opt(row
+            .try_get::<_, Option<f64>>(i)
+            .ok()
+            .flatten()
+            .map(Value::from)),
+        Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME => opt(row
+            .try_get::<_, Option<String>>(i)
+            .ok()
+            .flatten()
+            .map(Value::from)),
         // Compiled measures are cast to float8 and time dims to text, so other
         // types are rare; try text, then fall back to null.
-        _ => opt(row.try_get::<_, Option<String>>(i).ok().flatten().map(Value::from)),
+        _ => opt(row
+            .try_get::<_, Option<String>>(i)
+            .ok()
+            .flatten()
+            .map(Value::from)),
     }
 }
 

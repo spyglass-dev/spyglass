@@ -18,10 +18,24 @@ fn ev(cube: &str, measures: &[&str], dims: &[&str], dur: u64, rows: usize) -> Qu
 #[test]
 fn analyze_aggregates_usage() {
     let lines = vec![
-        serde_json::to_string(&ev("Submissions", &["Submissions.to_grade"], &["Submissions.class_id"], 10, 3)).unwrap(),
+        serde_json::to_string(&ev(
+            "Submissions",
+            &["Submissions.to_grade"],
+            &["Submissions.class_id"],
+            10,
+            3,
+        ))
+        .unwrap(),
         serde_json::to_string(&ev("Submissions", &["Submissions.count"], &[], 20, 1)).unwrap(),
-        serde_json::to_string(&ev("Activities", &["Activities.count"], &["Activities.class_id"], 30, 5)).unwrap(),
-        "   ".to_string(),       // blank — skipped
+        serde_json::to_string(&ev(
+            "Activities",
+            &["Activities.count"],
+            &["Activities.class_id"],
+            30,
+            5,
+        ))
+        .unwrap(),
+        "   ".to_string(),        // blank — skipped
         "{not json}".to_string(), // malformed — skipped
     ];
     let stats = analyze_lines(lines.iter().map(|s| s.as_str()));

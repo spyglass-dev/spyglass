@@ -63,7 +63,8 @@ fn joined_dimension_compiles_to_left_join_with_qualified_columns() {
         ..Default::default()
     };
     let c = spyglass::compile(&model, &query, &scoped()).expect("compiles");
-    let expected = "select \"Customers\".name as \"Customers.customer_name\", count(*) as \"Orders.count\"\n\
+    let expected =
+        "select \"Customers\".name as \"Customers.customer_name\", count(*) as \"Orders.count\"\n\
 from orders as \"Orders\"\n\
 left join customers as \"Customers\" on \"Orders\".customer_id = \"Customers\".id\n\
 where \"Customers\".tenant_id = $1 and \"Orders\".tenant_id = $2\n\
@@ -71,7 +72,10 @@ group by \"Customers\".name";
     assert_eq!(c.sql, expected);
     assert_eq!(
         c.params,
-        vec![ScalarValue::String("t1".into()), ScalarValue::String("t1".into())]
+        vec![
+            ScalarValue::String("t1".into()),
+            ScalarValue::String("t1".into())
+        ]
     );
 }
 
@@ -84,7 +88,11 @@ fn multi_hop_join_emits_parents_first() {
         ..Default::default()
     };
     let c = spyglass::compile(&model, &query, &scoped()).expect("compiles");
-    let joins: Vec<&str> = c.sql.lines().filter(|l| l.starts_with("left join")).collect();
+    let joins: Vec<&str> = c
+        .sql
+        .lines()
+        .filter(|l| l.starts_with("left join"))
+        .collect();
     assert_eq!(
         joins,
         vec![
@@ -121,7 +129,10 @@ fn unreachable_cube_is_no_join_path() {
     // Base = Regions (measureless query starts at first dimension's cube);
     // Regions declares no joins at all.
     let query = Query {
-        dimensions: vec!["Regions.region_name".into(), "Customers.customer_name".into()],
+        dimensions: vec![
+            "Regions.region_name".into(),
+            "Customers.customer_name".into(),
+        ],
         ..Default::default()
     };
     let err = spyglass::compile(&model, &query, &SecurityContext::default().allow_unscoped())
@@ -158,8 +169,8 @@ fn joined_tenant_cube_without_scope_fails_closed() {
         ..Default::default()
     };
     // Scope only the base cube — the joined Customers cube must still refuse.
-    let base_only = SecurityContext::default()
-        .with_scope("Orders.tenant_id", ScalarValue::String("t1".into()));
+    let base_only =
+        SecurityContext::default().with_scope("Orders.tenant_id", ScalarValue::String("t1".into()));
     let err = spyglass::compile(&model, &query, &base_only).expect_err("must refuse");
     match err {
         CompileError::MissingTenantScope { cube, dimension } => {
@@ -190,7 +201,11 @@ left join customers as \"Customers\" on \"Orders\".customer_id = \"Customers\".i
 where \"Customers\".tenant_id = $1 and \"Orders\".tenant_id = $2\n\
 group by \"Orders\".customer_id, \"Customers\".name";
     assert_eq!(c.sql, expected);
-    let label_col = c.columns.iter().find(|col| col.kind == "label").expect("label column");
+    let label_col = c
+        .columns
+        .iter()
+        .find(|col| col.kind == "label")
+        .expect("label column");
     assert_eq!(label_col.key, "Orders.customer_id__label");
 }
 
@@ -205,12 +220,23 @@ fn sort_and_filter_still_act_on_the_id_not_the_label() {
             operator: FilterOperator::Equals,
             values: vec![ScalarValue::String("c42".into())],
         }],
-        order: vec![spyglass::query::Order { member: "Orders.customer_id".into(), desc: false }],
+        order: vec![spyglass::query::Order {
+            member: "Orders.customer_id".into(),
+            desc: false,
+        }],
         ..Default::default()
     };
     let c = spyglass::compile(&model, &query, &scoped()).expect("compiles");
-    assert!(c.sql.contains("\"Orders\".customer_id = $1"), "filter on id: {}", c.sql);
-    assert!(c.sql.contains("order by \"Orders.customer_id\" asc"), "order on id: {}", c.sql);
+    assert!(
+        c.sql.contains("\"Orders\".customer_id = $1"),
+        "filter on id: {}",
+        c.sql
+    );
+    assert!(
+        c.sql.contains("order by \"Orders.customer_id\" asc"),
+        "order on id: {}",
+        c.sql
+    );
     assert!(!c.sql.contains("order by \"Orders.customer_id__label\""));
 }
 
@@ -227,8 +253,16 @@ fn filter_on_joined_dimension_compiles_into_where() {
         ..Default::default()
     };
     let c = spyglass::compile(&model, &query, &scoped()).expect("compiles");
-    assert!(c.sql.contains("left join customers"), "join present: {}", c.sql);
-    assert!(c.sql.contains("\"Customers\".name::text ilike $1"), "filter qualified: {}", c.sql);
+    assert!(
+        c.sql.contains("left join customers"),
+        "join present: {}",
+        c.sql
+    );
+    assert!(
+        c.sql.contains("\"Customers\".name::text ilike $1"),
+        "filter qualified: {}",
+        c.sql
+    );
 }
 
 #[test]
@@ -252,8 +286,15 @@ group by status";
 fn drill_and_join_metadata_reach_the_catalog_without_sql() {
     let model = shop_model();
     let meta = model.metadata();
-    let orders = meta.cubes.iter().find(|c| c.name == "Orders").expect("Orders meta");
-    assert_eq!(orders.drill_members, vec!["customer_id", "status", "created_at"]);
+    let orders = meta
+        .cubes
+        .iter()
+        .find(|c| c.name == "Orders")
+        .expect("Orders meta");
+    assert_eq!(
+        orders.drill_members,
+        vec!["customer_id", "status", "created_at"]
+    );
     assert_eq!(orders.joins.len(), 1);
     assert_eq!(orders.joins[0].target, "Customers");
     let customer_id = orders
@@ -261,10 +302,16 @@ fn drill_and_join_metadata_reach_the_catalog_without_sql() {
         .iter()
         .find(|d| d.name == "customer_id")
         .expect("customer_id meta");
-    assert_eq!(customer_id.label.as_deref(), Some("Customers.customer_name"));
+    assert_eq!(
+        customer_id.label.as_deref(),
+        Some("Customers.customer_name")
+    );
     assert_eq!(customer_id.drill_entity.as_deref(), Some("customer"));
     // No SQL leaks anywhere in the serialized catalog.
     let json = serde_json::to_string(&meta).expect("serializes");
-    assert!(!json.contains("customer_id = "), "join SQL must not leak: {json}");
+    assert!(
+        !json.contains("customer_id = "),
+        "join SQL must not leak: {json}"
+    );
     assert!(!json.contains("${CUBE}"), "join SQL must not leak: {json}");
 }

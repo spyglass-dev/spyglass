@@ -23,8 +23,8 @@
 //! | captain    | orchestration       | [`engine`] (+ host)           |
 
 pub mod analyze;
-pub mod compiler;
 pub mod compare;
+pub mod compiler;
 pub mod context;
 pub mod dates;
 pub mod engine;
@@ -36,21 +36,23 @@ pub mod model;
 pub mod query;
 pub mod report;
 
+pub use analyze::{AnalyzeFilter, AnalyzeOptions, ColumnProfile, DbProfile, TableProfile};
 pub use compiler::{compile, compile_at, CompileError, Compiled};
 pub use context::SecurityContext;
-pub use analyze::{AnalyzeFilter, AnalyzeOptions, ColumnProfile, DbProfile, TableProfile};
 pub use introspect::{ColumnDef, RawSchema, TableDef};
+pub use logging::{
+    analyze_lines, analyze_log, JsonFileExporter, QueryEvent, QueryExporter, UsageStats,
+};
 pub use meta::{CubeMeta, DimensionMeta, JoinMeta, MeasureMeta, ModelMeta, SegmentMeta};
-pub use report::{resolve_widget, BoundReport, BoundWidget, ChartHint};
-pub use logging::{analyze_log, analyze_lines, JsonFileExporter, QueryEvent, QueryExporter, UsageStats};
 pub use model::{
     Cube, Dimension, DimensionType, DrillTarget, Join, JoinRelationship, Measure, MeasureType,
     Model, Segment,
 };
 pub use query::{
-    Column, Compare, DateRange, Filter, FilterOperator, Granularity, Order, Query,
-    QueryMode, QueryResult, ScalarValue, TimeDimension, PREV_PREFIX,
+    Column, Compare, DateRange, Filter, FilterOperator, Granularity, Order, Query, QueryMode,
+    QueryResult, ScalarValue, TimeDimension, PREV_PREFIX,
 };
+pub use report::{resolve_widget, BoundReport, BoundWidget, ChartHint};
 
 #[cfg(feature = "postgres")]
 pub use engine::postgres::PostgresEngine;

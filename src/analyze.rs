@@ -120,7 +120,12 @@ pub fn classify(data_type: &str) -> ColumnClass {
 }
 
 /// Suggest a cube role from name + class + cardinality (heuristic, advisory).
-fn suggest_role(name: &str, class: ColumnClass, distinct: Option<i64>, row_count: i64) -> &'static str {
+fn suggest_role(
+    name: &str,
+    class: ColumnClass,
+    distinct: Option<i64>,
+    row_count: i64,
+) -> &'static str {
     if name == "id" || name.ends_with("_id") {
         return "id";
     }
@@ -227,7 +232,8 @@ mod exec {
                                 .collect();
                         }
                         ColumnClass::Numeric | ColumnClass::Temporal => {
-                            let sql = format!("select min({cq})::text, max({cq})::text from {tq}{wsql}");
+                            let sql =
+                                format!("select min({cq})::text, max({cq})::text from {tq}{wsql}");
                             let row = run_one(client, &sql, has_param, &opts.filter).await?;
                             profile.min = row.get::<_, Option<String>>(0);
                             profile.max = row.get::<_, Option<String>>(1);

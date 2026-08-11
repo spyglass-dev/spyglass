@@ -29,11 +29,18 @@ fn ctx() -> SecurityContext {
     SecurityContext::default().allow_unscoped()
 }
 
-fn td(granularity: Option<Granularity>, fill_gaps: bool, compare: Option<Compare>) -> TimeDimension {
+fn td(
+    granularity: Option<Granularity>,
+    fill_gaps: bool,
+    compare: Option<Compare>,
+) -> TimeDimension {
     TimeDimension {
         dimension: "Events.created_at".into(),
         granularity,
-        date_range: Some(DateRange::Absolute(["2026-08-01".into(), "2026-09-01".into()])),
+        date_range: Some(DateRange::Absolute([
+            "2026-08-01".into(),
+            "2026-09-01".into(),
+        ])),
         compare,
         fill_gaps,
     }
@@ -73,9 +80,17 @@ fn quarter_steps_use_three_months_and_totals_count_buckets() {
     assert!(c.sql.contains("interval '3 months'"), "sql: {}", c.sql);
     // The __total window column sits on the OUTER select (counts buckets),
     // and appears exactly once.
-    assert_eq!(c.sql.matches("count(*) over ()").count(), 1, "sql: {}", c.sql);
+    assert_eq!(
+        c.sql.matches("count(*) over ()").count(),
+        1,
+        "sql: {}",
+        c.sql
+    );
     let outer_first_line = c.sql.lines().next().unwrap();
-    assert!(outer_first_line.contains("count(*) over ()"), "outer total: {outer_first_line}");
+    assert!(
+        outer_first_line.contains("count(*) over ()"),
+        "outer total: {outer_first_line}"
+    );
 }
 
 #[test]
@@ -90,7 +105,10 @@ fn fill_gaps_and_compare_share_the_solo_grouping_contract() {
         };
         let err = spyglass::compile(&model(), &query, &ctx()).expect_err("must refuse");
         assert!(
-            matches!(err, CompileError::BadFillGaps(_) | CompileError::BadCompare(_)),
+            matches!(
+                err,
+                CompileError::BadFillGaps(_) | CompileError::BadCompare(_)
+            ),
             "got: {err}"
         );
     }

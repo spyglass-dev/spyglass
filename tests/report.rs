@@ -1,9 +1,9 @@
 //! Report resolver tests — pure, no database. Lock how bound widgets turn a
 //! `QueryResult` into the data-bearing `WidgetSpec` JSON the UI renders.
 
+use serde_json::json;
 use spyglass::query::{Column, Filter, FilterOperator, Query, QueryResult, ScalarValue};
 use spyglass::report::{resolve_widget, with_run_filters, BoundWidget, ChartHint};
-use serde_json::json;
 
 fn result(columns: &[(&str, &str)], rows: Vec<serde_json::Value>) -> QueryResult {
     QueryResult {
@@ -38,8 +38,15 @@ fn widget(kind: &str) -> BoundWidget {
 
 #[test]
 fn metric_reads_first_measure_value() {
-    let r = result(&[("Orders.revenue", "measure")], vec![json!({ "Orders.revenue": 128400.0 })]);
-    let w = BoundWidget { title: Some("Revenue".into()), w: Some(1), ..widget("metric") };
+    let r = result(
+        &[("Orders.revenue", "measure")],
+        vec![json!({ "Orders.revenue": 128400.0 })],
+    );
+    let w = BoundWidget {
+        title: Some("Revenue".into()),
+        w: Some(1),
+        ..widget("metric")
+    };
     let spec = resolve_widget(&w, Some(&r));
     assert_eq!(spec["type"], "metric");
     assert_eq!(spec["title"], "Revenue");
@@ -52,7 +59,10 @@ fn metric_picks_named_value_member() {
         &[("Subs.to_grade", "measure"), ("Subs.graded", "measure")],
         vec![json!({ "Subs.to_grade": 2, "Subs.graded": 89 })],
     );
-    let w = BoundWidget { value: Some("Subs.graded".into()), ..widget("metric") };
+    let w = BoundWidget {
+        value: Some("Subs.graded".into()),
+        ..widget("metric")
+    };
     let spec = resolve_widget(&w, Some(&r));
     assert_eq!(spec["value"], 89);
 }
@@ -72,7 +82,12 @@ fn table_maps_columns_and_rows() {
     let spec = resolve_widget(&widget("table"), Some(&r));
     assert_eq!(spec["type"], "table");
     // Column labels are humanized from the member's local name.
-    let labels: Vec<_> = spec["columns"].as_array().unwrap().iter().map(|c| c["label"].as_str().unwrap().to_string()).collect();
+    let labels: Vec<_> = spec["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["label"].as_str().unwrap().to_string())
+        .collect();
     assert!(labels.contains(&"Status".to_string()), "{:?}", labels);
     assert_eq!(spec["rows"].as_array().unwrap().len(), 1);
 }
@@ -80,11 +95,20 @@ fn table_maps_columns_and_rows() {
 #[test]
 fn chart_infers_x_and_y_from_columns() {
     let r = result(
-        &[("Activities.source", "dimension"), ("Activities.count", "measure")],
+        &[
+            ("Activities.source", "dimension"),
+            ("Activities.count", "measure"),
+        ],
         vec![json!({ "Activities.source": "adhoc", "Activities.count": 108 })],
     );
     let w = BoundWidget {
-        chart: Some(ChartHint { mark: "bar".into(), x: None, y: None, max: None, format: None }),
+        chart: Some(ChartHint {
+            mark: "bar".into(),
+            x: None,
+            y: None,
+            max: None,
+            format: None,
+        }),
         ..widget("chart")
     };
     let spec = resolve_widget(&w, Some(&r));
@@ -96,7 +120,10 @@ fn chart_infers_x_and_y_from_columns() {
 
 #[test]
 fn note_passes_markdown_through() {
-    let w = BoundWidget { markdown: Some("**hi**".into()), ..widget("note") };
+    let w = BoundWidget {
+        markdown: Some("**hi**".into()),
+        ..widget("note")
+    };
     let spec = resolve_widget(&w, None);
     assert_eq!(spec["type"], "note");
     assert_eq!(spec["markdown"], "**hi**");
@@ -112,8 +139,16 @@ fn run_filters_apply_only_to_matching_cube() {
         ..Default::default()
     };
     let filters = vec![
-        Filter { member: "Rental.staff_id".into(), operator: FilterOperator::Equals, values: vec![ScalarValue::Int(2)] },
-        Filter { member: "Payment.staff_id".into(), operator: FilterOperator::Equals, values: vec![ScalarValue::Int(9)] },
+        Filter {
+            member: "Rental.staff_id".into(),
+            operator: FilterOperator::Equals,
+            values: vec![ScalarValue::Int(2)],
+        },
+        Filter {
+            member: "Payment.staff_id".into(),
+            operator: FilterOperator::Equals,
+            values: vec![ScalarValue::Int(9)],
+        },
     ];
     let out = with_run_filters(&query, &filters);
     // Only the Rental-cube filter is appended; the Payment one is skipped.

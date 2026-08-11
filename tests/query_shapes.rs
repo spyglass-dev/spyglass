@@ -63,7 +63,10 @@ fn include_total_adds_exactly_one_window_column_and_leaves_grouping_alone() {
     let plain = spyglass::compile(&model(), &base, &scoped()).unwrap();
     let with_total = spyglass::compile(
         &model(),
-        &Query { include_total: true, ..base },
+        &Query {
+            include_total: true,
+            ..base
+        },
         &scoped(),
     )
     .unwrap();
@@ -82,7 +85,11 @@ fn include_total_adds_exactly_one_window_column_and_leaves_grouping_alone() {
     };
     assert_eq!(group(&plain.sql), group(&with_total.sql));
     // The window column is the only projection difference.
-    let total_col = with_total.columns.iter().filter(|c| c.kind == "total").count();
+    let total_col = with_total
+        .columns
+        .iter()
+        .filter(|c| c.kind == "total")
+        .count();
     assert_eq!(total_col, 1);
 }
 
@@ -106,10 +113,24 @@ fn measure_filter_compiles_into_having_never_where() {
         ..Default::default()
     };
     let c = spyglass::compile(&model(), &query, &scoped()).expect("compiles");
-    let where_line = c.sql.lines().find(|l| l.starts_with("where")).expect("where");
-    let having_line = c.sql.lines().find(|l| l.starts_with("having")).expect("having");
-    assert!(!where_line.contains("sum(amount)"), "aggregate leaked into WHERE: {where_line}");
-    assert!(having_line.contains("sum(amount)::float8 >= "), "having: {having_line}");
+    let where_line = c
+        .sql
+        .lines()
+        .find(|l| l.starts_with("where"))
+        .expect("where");
+    let having_line = c
+        .sql
+        .lines()
+        .find(|l| l.starts_with("having"))
+        .expect("having");
+    assert!(
+        !where_line.contains("sum(amount)"),
+        "aggregate leaked into WHERE: {where_line}"
+    );
+    assert!(
+        having_line.contains("sum(amount)::float8 >= "),
+        "having: {having_line}"
+    );
     // HAVING params bind after WHERE + scope params.
     assert_eq!(
         c.params,
@@ -133,11 +154,23 @@ fn rows_mode_projects_requested_intersect_drill_members_without_grouping() {
         ..Default::default()
     };
     let c = spyglass::compile(&model(), &query, &scoped()).expect("compiles");
-    assert!(!c.sql.contains("group by"), "row mode must not group: {}", c.sql);
+    assert!(
+        !c.sql.contains("group by"),
+        "row mode must not group: {}",
+        c.sql
+    );
     let keys: Vec<&str> = c.columns.iter().map(|col| col.key.as_str()).collect();
-    assert_eq!(keys, vec!["Orders.status"], "projection is requested ∩ drill_members");
+    assert_eq!(
+        keys,
+        vec!["Orders.status"],
+        "projection is requested ∩ drill_members"
+    );
     // Scope still applies in row mode.
-    assert!(c.sql.contains("tenant_id = $1"), "scope must still apply: {}", c.sql);
+    assert!(
+        c.sql.contains("tenant_id = $1"),
+        "scope must still apply: {}",
+        c.sql
+    );
 }
 
 #[test]
@@ -167,9 +200,16 @@ fn rows_mode_refuses_a_cube_without_drill_members() {
         mode: QueryMode::Rows,
         ..Default::default()
     };
-    let err = spyglass::compile(&model(), &query, &SecurityContext::default().allow_unscoped())
-        .expect_err("must refuse");
-    assert!(matches!(err, CompileError::NoDrillMembers(ref c) if c == "Totals"), "got: {err}");
+    let err = spyglass::compile(
+        &model(),
+        &query,
+        &SecurityContext::default().allow_unscoped(),
+    )
+    .expect_err("must refuse");
+    assert!(
+        matches!(err, CompileError::NoDrillMembers(ref c) if c == "Totals"),
+        "got: {err}"
+    );
 }
 
 #[test]
@@ -180,7 +220,10 @@ fn rows_mode_refuses_measures_and_measure_filters() {
         ..Default::default()
     };
     let err = spyglass::compile(&model(), &with_measure, &scoped()).expect_err("must refuse");
-    assert!(matches!(err, CompileError::RowsWithMeasures(_)), "got: {err}");
+    assert!(
+        matches!(err, CompileError::RowsWithMeasures(_)),
+        "got: {err}"
+    );
 
     let with_measure_filter = Query {
         dimensions: vec!["Orders.status".into()],
@@ -192,7 +235,8 @@ fn rows_mode_refuses_measures_and_measure_filters() {
         mode: QueryMode::Rows,
         ..Default::default()
     };
-    let err = spyglass::compile(&model(), &with_measure_filter, &scoped()).expect_err("must refuse");
+    let err =
+        spyglass::compile(&model(), &with_measure_filter, &scoped()).expect_err("must refuse");
     assert!(matches!(err, CompileError::MeasureFilter(_)), "got: {err}");
 }
 

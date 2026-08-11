@@ -29,7 +29,9 @@ pub enum EngineError {
 /// unit-testable without sleeping; the engine passes `Instant::now()`.
 pub struct ResultCache {
     ttl: std::time::Duration,
-    map: std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, crate::query::QueryResult)>>,
+    map: std::sync::Mutex<
+        std::collections::HashMap<String, (std::time::Instant, crate::query::QueryResult)>,
+    >,
 }
 
 impl ResultCache {
@@ -37,7 +39,10 @@ impl ResultCache {
     const PRUNE_AT: usize = 512;
 
     pub fn new(ttl: std::time::Duration) -> Self {
-        Self { ttl, map: std::sync::Mutex::new(std::collections::HashMap::new()) }
+        Self {
+            ttl,
+            map: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
     }
 
     pub fn get_at(&self, key: &str, now: std::time::Instant) -> Option<crate::query::QueryResult> {
@@ -77,9 +82,14 @@ mod cache_tests {
         let cache = ResultCache::new(Duration::from_secs(30));
         let t0 = Instant::now();
         cache.put_at("k".into(), result(), t0);
-        let hit = cache.get_at("k", t0 + Duration::from_secs(29)).expect("fresh hit");
+        let hit = cache
+            .get_at("k", t0 + Duration::from_secs(29))
+            .expect("fresh hit");
         assert_eq!(hit.total, Some(7));
-        assert!(cache.get_at("k", t0 + Duration::from_secs(31)).is_none(), "expired");
+        assert!(
+            cache.get_at("k", t0 + Duration::from_secs(31)).is_none(),
+            "expired"
+        );
         assert!(cache.get_at("other", t0).is_none(), "different key");
     }
 }

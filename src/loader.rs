@@ -48,10 +48,11 @@ pub fn parse_str(contents: &str, path_for_errors: &str) -> Result<Model, LoadErr
         model.cubes.insert(cube.name.clone(), cube);
         Ok(model)
     } else {
-        let mut model: Model = serde_yaml::from_value(value).map_err(|source| LoadError::Parse {
-            path: path_for_errors.to_string(),
-            source,
-        })?;
+        let mut model: Model =
+            serde_yaml::from_value(value).map_err(|source| LoadError::Parse {
+                path: path_for_errors.to_string(),
+                source,
+            })?;
         // Backfill each cube's `name` from its map key (definitions under a
         // `cubes:` map don't repeat the name). An explicit `name:` inside a
         // cube still wins.
@@ -137,8 +138,9 @@ pub fn load_dir(dir: impl AsRef<Path>) -> Result<Model, LoadError> {
     }
     // Cross-reference validation runs on the MERGED model — a join or label
     // may legitimately point at a cube defined in another file.
-    model
-        .validate()
-        .map_err(|problems| LoadError::Invalid { dir: dir.display().to_string(), problems })?;
+    model.validate().map_err(|problems| LoadError::Invalid {
+        dir: dir.display().to_string(),
+        problems,
+    })?;
     Ok(model)
 }

@@ -68,9 +68,17 @@ fn interpolation_nests_and_having_works_on_calculated_measures() {
     };
     let c = spyglass::compile(&model(), &query, &scoped()).expect("compiles");
     // Nested: publish_rate_pretty -> publish_rate -> published/count.
-    assert!(c.sql.contains("round((sum(case when"), "nested interpolation: {}", c.sql);
+    assert!(
+        c.sql.contains("round((sum(case when"),
+        "nested interpolation: {}",
+        c.sql
+    );
     // The measure filter routes to HAVING against the interpolated aggregate.
-    assert!(c.sql.contains("\nhaving (sum(case when"), "having: {}", c.sql);
+    assert!(
+        c.sql.contains("\nhaving (sum(case when"),
+        "having: {}",
+        c.sql
+    );
 }
 
 #[test]
@@ -87,7 +95,10 @@ cubes:
         "t.yml",
     )
     .unwrap();
-    let query = Query { measures: vec!["Items.bad".into()], ..Default::default() };
+    let query = Query {
+        measures: vec!["Items.bad".into()],
+        ..Default::default()
+    };
     let err = spyglass::compile(&m, &query, &SecurityContext::default().allow_unscoped())
         .expect_err("must refuse");
     assert!(matches!(err, CompileError::UnknownMember(_)), "got: {err}");
@@ -108,7 +119,10 @@ cubes:
     )
     .unwrap();
     let problems = cyclic.validate().expect_err("cycle must fail");
-    assert!(problems.iter().any(|p| p.contains("cycle")), "problems: {problems:?}");
+    assert!(
+        problems.iter().any(|p| p.contains("cycle")),
+        "problems: {problems:?}"
+    );
 
     let dangling = spyglass::loader::parse_str(
         r#"
@@ -124,7 +138,10 @@ cubes:
     .unwrap();
     let problems = dangling.validate().expect_err("dangling ref must fail");
     let text = problems.join("\n");
-    assert!(text.contains("'missing' is not a measure"), "problems: {text}");
+    assert!(
+        text.contains("'missing' is not a measure"),
+        "problems: {text}"
+    );
     // Interpolation in a non-number measure (aggregates can't nest) is flagged.
     assert!(text.contains("`number` measures"), "problems: {text}");
 }
@@ -152,16 +169,26 @@ fn unknown_segment_is_refused() {
         ..Default::default()
     };
     let err = spyglass::compile(&model(), &query, &scoped()).expect_err("must refuse");
-    assert!(matches!(err, CompileError::UnknownMember(ref m) if m == "Items.ghost"), "got: {err}");
+    assert!(
+        matches!(err, CompileError::UnknownMember(ref m) if m == "Items.ghost"),
+        "got: {err}"
+    );
 }
 
 #[test]
 fn segments_reach_the_catalog_without_sql() {
     let meta = model().metadata();
-    let items = meta.cubes.iter().find(|c| c.name == "Items").expect("Items");
+    let items = meta
+        .cubes
+        .iter()
+        .find(|c| c.name == "Items")
+        .expect("Items");
     assert_eq!(items.segments.len(), 1);
     assert_eq!(items.segments[0].member, "Items.active");
-    assert_eq!(items.segments[0].description.as_deref(), Some("Items not archived."));
+    assert_eq!(
+        items.segments[0].description.as_deref(),
+        Some("Items not archived.")
+    );
     let json = serde_json::to_string(&meta).unwrap();
     assert!(!json.contains("archived_at"), "segment SQL leaked: {json}");
     assert!(!json.contains("nullif"), "calculated SQL leaked: {json}");

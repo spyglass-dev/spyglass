@@ -33,13 +33,13 @@
 //!   spyglass-server analyze --profile --filter workspace_id=ws_123
 
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use serde::Deserialize;
 use spyglass::analyze::{AnalyzeFilter, AnalyzeOptions};
 use spyglass::context::SecurityContext;
 use spyglass::engine::postgres::PostgresEngine;
 use spyglass::logging::JsonFileExporter;
 use spyglass::model::Model;
 use spyglass::query::{Filter, Query, ScalarValue};
-use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -73,7 +73,9 @@ async fn query(state: web::Data<AppState>, body: web::Json<QueryBody>) -> impl R
     match (&body.query, &body.queries) {
         (Some(q), None) => match state.engine.run(&state.model, q, &ctx).await {
             Ok(result) => HttpResponse::Ok().json(result),
-            Err(e) => HttpResponse::BadRequest().json(serde_json::json!({ "error": e.to_string() })),
+            Err(e) => {
+                HttpResponse::BadRequest().json(serde_json::json!({ "error": e.to_string() }))
+            }
         },
         (None, Some(qs)) => {
             // Per-item results: one bad widget must not blank the other 11.
@@ -115,7 +117,13 @@ async fn values(state: web::Data<AppState>, body: web::Json<ValuesBody>) -> impl
     };
     match state
         .engine
-        .values(&state.model, &body.member, body.search.as_deref(), body.limit, &ctx)
+        .values(
+            &state.model,
+            &body.member,
+            body.search.as_deref(),
+            body.limit,
+            &ctx,
+        )
         .await
     {
         Ok(result) => {
@@ -251,9 +259,7 @@ async fn report_save(
             Err(e) => HttpResponse::InternalServerError()
                 .json(serde_json::json!({ "error": e.to_string() })),
         },
-        Err(e) => {
-            HttpResponse::BadRequest().json(serde_json::json!({ "error": e.to_string() }))
-        }
+        Err(e) => HttpResponse::BadRequest().json(serde_json::json!({ "error": e.to_string() })),
     }
 }
 
@@ -290,7 +296,10 @@ async fn report_run(
         }
         run_filters = b.filters;
     }
-    let ctx = SecurityContext { scope, ..Default::default() };
+    let ctx = SecurityContext {
+        scope,
+        ..Default::default()
+    };
 
     let mut widgets = Vec::with_capacity(report.widgets.len());
     for w in &report.widgets {
@@ -347,7 +356,8 @@ async fn ui_handler(req: actix_web::HttpRequest) -> impl Responder {
                 .content_type("text/html; charset=utf-8")
                 .body(index.data.into_owned());
         }
-        return HttpResponse::NotFound().body("UI not built (run: pnpm --filter @spyglass/studio build)");
+        return HttpResponse::NotFound()
+            .body("UI not built (run: pnpm --filter @spyglass/studio build)");
     }
 
     #[cfg(not(feature = "ui"))]
@@ -401,7 +411,10 @@ async fn serve() -> std::io::Result<()> {
     // mandatory scope. Point `DATABASE_URL` at a readonly role for full effect.
     let engine = match std::env::var("SPYGLASS_RLS_GUC") {
         Ok(guc) if !guc.trim().is_empty() => {
-            eprintln!("RLS enabled: set_config('{}', <scope>, true) per query", guc.trim());
+            eprintln!(
+                "RLS enabled: set_config('{}', <scope>, true) per query",
+                guc.trim()
+            );
             engine.with_rls_guc(guc.trim())
         }
         _ => engine,
@@ -410,7 +423,10 @@ async fn serve() -> std::io::Result<()> {
     // Optional row cap: `SPYGLASS_MAX_ROWS` clamps every query's limit; a
     // result that fills the cap is marked `truncated_at` in the response
     // instead of silently looking complete.
-    let engine = match std::env::var("SPYGLASS_MAX_ROWS").ok().and_then(|v| v.trim().parse::<u32>().ok()) {
+    let engine = match std::env::var("SPYGLASS_MAX_ROWS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+    {
         Some(max) if max > 0 => {
             eprintln!("row cap: {max} rows per query (SPYGLASS_MAX_ROWS)");
             engine.with_max_rows(max)
@@ -420,7 +436,10 @@ async fn serve() -> std::io::Result<()> {
 
     // Optional short-TTL result cache; the key includes the tenant scope, so
     // a hit can never cross tenants. Relative windows roll over naturally.
-    let engine = match std::env::var("SPYGLASS_CACHE_TTL_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()) {
+    let engine = match std::env::var("SPYGLASS_CACHE_TTL_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+    {
         Some(ms) if ms > 0 => {
             eprintln!("result cache: {ms}ms TTL (SPYGLASS_CACHE_TTL_MS)");
             engine.with_cache(std::time::Duration::from_millis(ms))
@@ -428,7 +447,8 @@ async fn serve() -> std::io::Result<()> {
         _ => engine,
     };
 
-    let reports_dir = std::env::var("REPORTING_REPORTS").unwrap_or_else(|_| "./reports".to_string());
+    let reports_dir =
+        std::env::var("REPORTING_REPORTS").unwrap_or_else(|_| "./reports".to_string());
     eprintln!("reports dir: {reports_dir}");
 
     let state = web::Data::new(AppState {
@@ -445,7 +465,10 @@ async fn serve() -> std::io::Result<()> {
             // Permissive read CORS so a separate UI dev server can hit the
             // catalog/reports APIs (POSTs from another origin should use a dev
             // proxy; same-origin explorer needs none).
-            .wrap(actix_web::middleware::DefaultHeaders::new().add(("Access-Control-Allow-Origin", "*")))
+            .wrap(
+                actix_web::middleware::DefaultHeaders::new()
+                    .add(("Access-Control-Allow-Origin", "*")),
+            )
             .route("/health", web::get().to(health))
             .route("/meta", web::get().to(meta))
             .route("/schema", web::get().to(schema))
@@ -472,7 +495,10 @@ async fn run_schema() -> std::io::Result<()> {
         eprintln!("introspection failed: {e}");
         std::process::exit(1);
     });
-    println!("{}", serde_json::to_string_pretty(&schema).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&schema).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -519,7 +545,10 @@ async fn run_analyze(args: &[String]) -> std::io::Result<()> {
         eprintln!("analysis failed: {e}");
         std::process::exit(1);
     });
-    println!("{}", serde_json::to_string_pretty(&profile).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&profile).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -619,7 +648,10 @@ async fn run_bundle(args: &[String]) -> std::io::Result<()> {
         profile,
         sources: read_sources(&sources),
     };
-    println!("{}", serde_json::to_string_pretty(&bundle).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&bundle).unwrap_or_default()
+    );
     Ok(())
 }
 

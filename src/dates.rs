@@ -74,7 +74,11 @@ fn shift_period_start(start: NaiveDate, unit: Unit, n: i32) -> NaiveDate {
 
 /// Resolve a relative-range expression to `[from, to)` UTC RFC3339 instants,
 /// evaluated at `now` in `tz`.
-pub fn resolve_relative(spec: &str, now: DateTime<Utc>, tz: Tz) -> Result<(String, String), String> {
+pub fn resolve_relative(
+    spec: &str,
+    now: DateTime<Utc>,
+    tz: Tz,
+) -> Result<(String, String), String> {
     let today = now.with_timezone(&tz).date_naive();
     let words: Vec<String> = spec
         .to_lowercase()
@@ -193,7 +197,9 @@ pub fn shift_window(
             let back = |d: DateTime<Utc>| {
                 d.with_year(d.year() - 1).unwrap_or_else(|| {
                     // Feb 29 → Feb 28 of the previous (non-leap) year.
-                    d.with_day(28).and_then(|d| d.with_year(d.year() - 1)).expect("clamped date exists")
+                    d.with_day(28)
+                        .and_then(|d| d.with_year(d.year() - 1))
+                        .expect("clamped date exists")
                 })
             };
             (back(from_dt), back(to_dt))
@@ -206,9 +212,9 @@ pub fn shift_window(
 pub fn parse_tz(name: Option<&str>) -> Result<Tz, String> {
     match name.map(str::trim).filter(|s| !s.is_empty()) {
         None => Ok(chrono_tz::UTC),
-        Some(name) => name
-            .parse::<Tz>()
-            .map_err(|_| format!("unknown timezone '{name}' (expected an IANA name like 'Europe/London')")),
+        Some(name) => name.parse::<Tz>().map_err(|_| {
+            format!("unknown timezone '{name}' (expected an IANA name like 'Europe/London')")
+        }),
     }
 }
 
@@ -223,7 +229,8 @@ mod tests {
     #[test]
     fn last_n_days_includes_today() {
         // Sat 2026-08-09, UTC.
-        let (from, to) = resolve_relative("last 30 days", at("2026-08-09T14:30:00Z"), chrono_tz::UTC).unwrap();
+        let (from, to) =
+            resolve_relative("last 30 days", at("2026-08-09T14:30:00Z"), chrono_tz::UTC).unwrap();
         assert_eq!(from, "2026-07-11T00:00:00+00:00");
         assert_eq!(to, "2026-08-10T00:00:00+00:00");
     }
@@ -231,7 +238,8 @@ mod tests {
     #[test]
     fn next_n_days_starts_today() {
         // The mirror of "last N days": a forward window that includes today.
-        let (from, to) = resolve_relative("next 31 days", at("2026-08-09T14:30:00Z"), chrono_tz::UTC).unwrap();
+        let (from, to) =
+            resolve_relative("next 31 days", at("2026-08-09T14:30:00Z"), chrono_tz::UTC).unwrap();
         assert_eq!(from, "2026-08-09T00:00:00+00:00");
         assert_eq!(to, "2026-09-09T00:00:00+00:00");
     }
@@ -240,7 +248,10 @@ mod tests {
     fn next_n_months_is_calendar_aligned_and_next_0_is_rejected() {
         let now = at("2026-08-09T14:30:00Z");
         let (from, to) = resolve_relative("next 2 months", now, chrono_tz::UTC).unwrap();
-        assert_eq!((from.as_str(), to.as_str()), ("2026-08-01T00:00:00+00:00", "2026-10-01T00:00:00+00:00"));
+        assert_eq!(
+            (from.as_str(), to.as_str()),
+            ("2026-08-01T00:00:00+00:00", "2026-10-01T00:00:00+00:00")
+        );
         assert!(resolve_relative("next 0 days", now, chrono_tz::UTC).is_err());
         assert!(resolve_relative("next fortnight", now, chrono_tz::UTC).is_err());
     }
@@ -249,22 +260,35 @@ mod tests {
     fn this_month_and_previous_quarter_are_calendar_aligned() {
         let now = at("2026-08-09T14:30:00Z");
         let (from, to) = resolve_relative("this month", now, chrono_tz::UTC).unwrap();
-        assert_eq!((from.as_str(), to.as_str()), ("2026-08-01T00:00:00+00:00", "2026-09-01T00:00:00+00:00"));
+        assert_eq!(
+            (from.as_str(), to.as_str()),
+            ("2026-08-01T00:00:00+00:00", "2026-09-01T00:00:00+00:00")
+        );
         let (from, to) = resolve_relative("previous quarter", now, chrono_tz::UTC).unwrap();
-        assert_eq!((from.as_str(), to.as_str()), ("2026-04-01T00:00:00+00:00", "2026-07-01T00:00:00+00:00"));
+        assert_eq!(
+            (from.as_str(), to.as_str()),
+            ("2026-04-01T00:00:00+00:00", "2026-07-01T00:00:00+00:00")
+        );
     }
 
     #[test]
     fn bare_last_month_means_previous_month() {
-        let (from, to) = resolve_relative("last month", at("2026-08-09T00:00:00Z"), chrono_tz::UTC).unwrap();
-        assert_eq!((from.as_str(), to.as_str()), ("2026-07-01T00:00:00+00:00", "2026-08-01T00:00:00+00:00"));
+        let (from, to) =
+            resolve_relative("last month", at("2026-08-09T00:00:00Z"), chrono_tz::UTC).unwrap();
+        assert_eq!(
+            (from.as_str(), to.as_str()),
+            ("2026-07-01T00:00:00+00:00", "2026-08-01T00:00:00+00:00")
+        );
     }
 
     #[test]
     fn ytd_and_this_week_iso_monday() {
         let now = at("2026-08-09T14:30:00Z"); // a Sunday
         let (from, to) = resolve_relative("ytd", now, chrono_tz::UTC).unwrap();
-        assert_eq!((from.as_str(), to.as_str()), ("2026-01-01T00:00:00+00:00", "2026-08-10T00:00:00+00:00"));
+        assert_eq!(
+            (from.as_str(), to.as_str()),
+            ("2026-01-01T00:00:00+00:00", "2026-08-10T00:00:00+00:00")
+        );
         let (from, _) = resolve_relative("this week", now, chrono_tz::UTC).unwrap();
         assert_eq!(from, "2026-08-03T00:00:00+00:00"); // Monday
     }
@@ -275,22 +299,36 @@ mod tests {
         let now = at("2026-08-09T01:00:00Z");
         let tz: Tz = "America/Los_Angeles".parse().unwrap();
         let (from, to) = resolve_relative("today", now, tz).unwrap();
-        assert_eq!((from.as_str(), to.as_str()), ("2026-08-08T07:00:00+00:00", "2026-08-09T07:00:00+00:00"));
+        assert_eq!(
+            (from.as_str(), to.as_str()),
+            ("2026-08-08T07:00:00+00:00", "2026-08-09T07:00:00+00:00")
+        );
         let (utc_from, _) = resolve_relative("today", now, chrono_tz::UTC).unwrap();
         assert_eq!(utc_from, "2026-08-09T00:00:00+00:00");
     }
 
     #[test]
     fn month_arithmetic_survives_year_boundaries() {
-        let (from, to) = resolve_relative("last 3 months", at("2026-01-15T00:00:00Z"), chrono_tz::UTC).unwrap();
-        assert_eq!((from.as_str(), to.as_str()), ("2025-11-01T00:00:00+00:00", "2026-02-01T00:00:00+00:00"));
+        let (from, to) =
+            resolve_relative("last 3 months", at("2026-01-15T00:00:00Z"), chrono_tz::UTC).unwrap();
+        assert_eq!(
+            (from.as_str(), to.as_str()),
+            ("2025-11-01T00:00:00+00:00", "2026-02-01T00:00:00+00:00")
+        );
     }
 
     #[test]
     fn junk_is_rejected_with_the_accepted_forms() {
-        let err = resolve_relative("sometime recently", at("2026-08-09T00:00:00Z"), chrono_tz::UTC).unwrap_err();
+        let err = resolve_relative(
+            "sometime recently",
+            at("2026-08-09T00:00:00Z"),
+            chrono_tz::UTC,
+        )
+        .unwrap_err();
         assert!(err.contains("accepted:"), "err: {err}");
-        assert!(resolve_relative("last 0 days", at("2026-08-09T00:00:00Z"), chrono_tz::UTC).is_err());
+        assert!(
+            resolve_relative("last 0 days", at("2026-08-09T00:00:00Z"), chrono_tz::UTC).is_err()
+        );
     }
 
     #[test]
@@ -302,24 +340,41 @@ mod tests {
         )
         .unwrap();
         // Width is 31 days, so the previous window is [Jul 1, Aug 1).
-        assert_eq!((from.as_str(), to.as_str()), ("2026-07-01T00:00:00+00:00", "2026-08-01T00:00:00+00:00"));
+        assert_eq!(
+            (from.as_str(), to.as_str()),
+            ("2026-07-01T00:00:00+00:00", "2026-08-01T00:00:00+00:00")
+        );
     }
 
     #[test]
     fn previous_year_shifts_calendar_year_and_accepts_bare_dates() {
-        let (from, to) =
-            shift_window("2026-03-01", "2026-04-01", crate::query::Compare::PreviousYear).unwrap();
-        assert_eq!((from.as_str(), to.as_str()), ("2025-03-01T00:00:00+00:00", "2025-04-01T00:00:00+00:00"));
+        let (from, to) = shift_window(
+            "2026-03-01",
+            "2026-04-01",
+            crate::query::Compare::PreviousYear,
+        )
+        .unwrap();
+        assert_eq!(
+            (from.as_str(), to.as_str()),
+            ("2025-03-01T00:00:00+00:00", "2025-04-01T00:00:00+00:00")
+        );
         // Feb 29 clamps instead of failing.
-        let (from, _) =
-            shift_window("2024-02-29", "2024-03-01", crate::query::Compare::PreviousYear).unwrap();
+        let (from, _) = shift_window(
+            "2024-02-29",
+            "2024-03-01",
+            crate::query::Compare::PreviousYear,
+        )
+        .unwrap();
         assert_eq!(from, "2023-02-28T00:00:00+00:00");
     }
 
     #[test]
     fn parse_tz_defaults_to_utc_and_rejects_junk() {
         assert_eq!(parse_tz(None).unwrap(), chrono_tz::UTC);
-        assert_eq!(parse_tz(Some("Europe/London")).unwrap().name(), "Europe/London");
+        assert_eq!(
+            parse_tz(Some("Europe/London")).unwrap().name(),
+            "Europe/London"
+        );
         assert!(parse_tz(Some("Mars/Olympus")).is_err());
     }
 }

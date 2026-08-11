@@ -10,25 +10,46 @@ fn submissions_model() -> Model {
     let mut dimensions = BTreeMap::new();
     dimensions.insert(
         "status".to_string(),
-        Dimension { dimension_type: DimensionType::String, sql: Some("status".into()), ..Default::default() },
+        Dimension {
+            dimension_type: DimensionType::String,
+            sql: Some("status".into()),
+            ..Default::default()
+        },
     );
     dimensions.insert(
         "workspace_id".to_string(),
-        Dimension { dimension_type: DimensionType::String, sql: Some("workspace_id".into()), tenant: true, ..Default::default() },
+        Dimension {
+            dimension_type: DimensionType::String,
+            sql: Some("workspace_id".into()),
+            tenant: true,
+            ..Default::default()
+        },
     );
     dimensions.insert(
         "created_at".to_string(),
-        Dimension { dimension_type: DimensionType::Time, sql: Some("created_at".into()), ..Default::default() },
+        Dimension {
+            dimension_type: DimensionType::Time,
+            sql: Some("created_at".into()),
+            ..Default::default()
+        },
     );
 
     let mut measures = BTreeMap::new();
     measures.insert(
         "count".to_string(),
-        Measure { measure_type: MeasureType::Count, ..Default::default() },
+        Measure {
+            measure_type: MeasureType::Count,
+            ..Default::default()
+        },
     );
     measures.insert(
         "avg_score".to_string(),
-        Measure { measure_type: MeasureType::Avg, sql: Some("score_pct".into()), format: Some("percent".into()), ..Default::default() },
+        Measure {
+            measure_type: MeasureType::Avg,
+            sql: Some("score_pct".into()),
+            format: Some("percent".into()),
+            ..Default::default()
+        },
     );
 
     let cube = Cube {
@@ -70,7 +91,10 @@ limit 100";
     assert_eq!(c.sql, expected);
     assert_eq!(
         c.params,
-        vec![ScalarValue::String("graded".into()), ScalarValue::String("w1".into())]
+        vec![
+            ScalarValue::String("graded".into()),
+            ScalarValue::String("w1".into())
+        ]
     );
     assert_eq!(c.columns.len(), 3);
 }
@@ -104,7 +128,11 @@ fn allow_unscoped_bypasses_tenant_requirement() {
     };
     let ctx = SecurityContext::default().allow_unscoped();
     let c = spyglass::compile(&model, &query, &ctx).expect("compiles unscoped");
-    assert!(!c.sql.contains("where"), "should have no scope filter: {}", c.sql);
+    assert!(
+        !c.sql.contains("where"),
+        "should have no scope filter: {}",
+        c.sql
+    );
     assert!(c.params.is_empty());
 }
 
@@ -118,7 +146,11 @@ fn scope_is_always_injected_even_with_no_filters() {
     let ctx = SecurityContext::default()
         .with_scope("Submissions.workspace_id", ScalarValue::String("w9".into()));
     let c = spyglass::compile(&model, &query, &ctx).expect("compiles");
-    assert!(c.sql.contains("where workspace_id = $1"), "sql was: {}", c.sql);
+    assert!(
+        c.sql.contains("where workspace_id = $1"),
+        "sql was: {}",
+        c.sql
+    );
     assert_eq!(c.params, vec![ScalarValue::String("w9".into())]);
 }
 
@@ -130,19 +162,34 @@ fn time_dimension_truncates_and_ranges() {
         time_dimensions: vec![spyglass::TimeDimension {
             dimension: "Submissions.created_at".into(),
             granularity: Some(spyglass::Granularity::Day),
-            date_range: Some(spyglass::query::DateRange::Absolute(["2026-01-01".into(), "2026-02-01".into()])),
+            date_range: Some(spyglass::query::DateRange::Absolute([
+                "2026-01-01".into(),
+                "2026-02-01".into(),
+            ])),
             ..Default::default()
         }],
-        order: vec![Order { member: "Submissions.created_at".into(), desc: false }],
+        order: vec![Order {
+            member: "Submissions.created_at".into(),
+            desc: false,
+        }],
         ..Default::default()
     };
     // Not exercising scope here — read across tenants explicitly.
     let ctx = SecurityContext::default().allow_unscoped();
     let c = spyglass::compile(&model, &query, &ctx).expect("compiles");
-    assert!(c.sql.contains("date_trunc('day', created_at)::text as \"Submissions.created_at\""), "{}", c.sql);
+    assert!(
+        c.sql
+            .contains("date_trunc('day', created_at)::text as \"Submissions.created_at\""),
+        "{}",
+        c.sql
+    );
     assert!(c.sql.contains("created_at >= $1"), "{}", c.sql);
     assert!(c.sql.contains("created_at < $2"), "{}", c.sql);
-    assert!(c.sql.contains("order by \"Submissions.created_at\" asc"), "{}", c.sql);
+    assert!(
+        c.sql.contains("order by \"Submissions.created_at\" asc"),
+        "{}",
+        c.sql
+    );
 }
 
 #[test]
@@ -165,7 +212,11 @@ fn filter_on_measure_routes_to_having() {
         .with_scope("Submissions.workspace_id", ScalarValue::String("w1".into()));
     let c = spyglass::compile(&model, &query, &ctx).expect("compiles");
     assert!(c.sql.contains("\nhaving count(*) > $2"), "sql: {}", c.sql);
-    assert!(!c.sql.contains("where count"), "aggregate must not reach WHERE: {}", c.sql);
+    assert!(
+        !c.sql.contains("where count"),
+        "aggregate must not reach WHERE: {}",
+        c.sql
+    );
 }
 
 #[test]
@@ -177,11 +228,15 @@ fn in_filter_expands_placeholders() {
         filters: vec![Filter {
             member: "Submissions.status".into(),
             operator: FilterOperator::In,
-            values: vec![ScalarValue::String("graded".into()), ScalarValue::String("submitted".into())],
+            values: vec![
+                ScalarValue::String("graded".into()),
+                ScalarValue::String("submitted".into()),
+            ],
         }],
         ..Default::default()
     };
-    let c = spyglass::compile(&model, &query, &SecurityContext::default().allow_unscoped()).expect("compiles");
+    let c = spyglass::compile(&model, &query, &SecurityContext::default().allow_unscoped())
+        .expect("compiles");
     assert!(c.sql.contains("status in ($1, $2)"), "{}", c.sql);
     assert_eq!(c.params.len(), 2);
 }
@@ -251,8 +306,12 @@ cubes:
     // number tenant scope → ::numeric
     let mut scope = BTreeMap::new();
     scope.insert("Sales.store_id".to_string(), ScalarValue::Int(2));
-    let ctx = SecurityContext { scope, ..Default::default() };
-    let q: Query = serde_json::from_value(serde_json::json!({ "measures": ["Sales.count"] })).unwrap();
+    let ctx = SecurityContext {
+        scope,
+        ..Default::default()
+    };
+    let q: Query =
+        serde_json::from_value(serde_json::json!({ "measures": ["Sales.count"] })).unwrap();
     let c = spyglass::compile(&model, &q, &ctx).unwrap();
     assert!(c.sql.contains("store_id = $1::numeric"), "{}", c.sql);
 
@@ -268,7 +327,11 @@ cubes:
     .unwrap();
     let c2 = spyglass::compile(&model, &q2, &SecurityContext::default().allow_unscoped()).unwrap();
     assert!(c2.sql.contains("active = $1::boolean"), "{}", c2.sql);
-    assert!(c2.sql.contains("region = $2") && !c2.sql.contains("region = $2::"), "{}", c2.sql);
+    assert!(
+        c2.sql.contains("region = $2") && !c2.sql.contains("region = $2::"),
+        "{}",
+        c2.sql
+    );
     assert!(c2.sql.contains("sold_at >= $3::timestamptz"), "{}", c2.sql);
     assert!(c2.sql.contains("sold_at < $4::timestamptz"), "{}", c2.sql);
 }
@@ -294,9 +357,18 @@ cubes:
 "#;
     let model = spyglass::loader::parse_str(yaml, "test.yml").expect("parses");
     let mut scope = BTreeMap::new();
-    scope.insert("Orders.workspace_id".to_string(), ScalarValue::String("w1".into()));
-    scope.insert("Events.workspace_id".to_string(), ScalarValue::String("w1".into()));
-    let ctx = SecurityContext { scope, ..Default::default() };
+    scope.insert(
+        "Orders.workspace_id".to_string(),
+        ScalarValue::String("w1".into()),
+    );
+    scope.insert(
+        "Events.workspace_id".to_string(),
+        ScalarValue::String("w1".into()),
+    );
+    let ctx = SecurityContext {
+        scope,
+        ..Default::default()
+    };
     let query: Query = serde_json::from_value(serde_json::json!({
         "measures": ["Orders.count"]
     }))
@@ -304,7 +376,12 @@ cubes:
     let c = spyglass::compile(&model, &query, &ctx).expect("compiles to one cube");
     assert!(c.sql.contains("from orders"), "{}", c.sql);
     // Exactly one scope param applied (Orders'), not both cubes'.
-    assert_eq!(c.params.len(), 1, "only this cube's scope applies: {}", c.sql);
+    assert_eq!(
+        c.params.len(),
+        1,
+        "only this cube's scope applies: {}",
+        c.sql
+    );
 }
 
 #[test]

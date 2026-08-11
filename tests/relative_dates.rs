@@ -8,7 +8,9 @@ use spyglass::context::SecurityContext;
 use spyglass::query::{DateRange, Query, ScalarValue, TimeDimension};
 
 fn strs(v: &[&str]) -> Vec<ScalarValue> {
-    v.iter().map(|s| ScalarValue::String(s.to_string())).collect()
+    v.iter()
+        .map(|s| ScalarValue::String(s.to_string()))
+        .collect()
 }
 
 fn model() -> spyglass::model::Model {
@@ -56,8 +58,14 @@ fn a_stored_relative_range_resolves_to_a_live_window_per_clock() {
     // Same document, different clock → different bound window. The SQL shape
     // is identical; only the params move.
     assert_eq!(jan.sql, aug.sql);
-    assert_eq!(jan.params, strs(&["2025-12-17T00:00:00+00:00", "2026-01-16T00:00:00+00:00"]));
-    assert_eq!(aug.params, strs(&["2026-07-11T00:00:00+00:00", "2026-08-10T00:00:00+00:00"]));
+    assert_eq!(
+        jan.params,
+        strs(&["2025-12-17T00:00:00+00:00", "2026-01-16T00:00:00+00:00"])
+    );
+    assert_eq!(
+        aug.params,
+        strs(&["2026-07-11T00:00:00+00:00", "2026-08-10T00:00:00+00:00"])
+    );
 }
 
 #[test]
@@ -66,12 +74,18 @@ fn timezone_shifts_the_window_boundaries() {
     let now = clock("2026-08-09T01:00:00Z"); // Aug 8 evening in Los Angeles
     let la = spyglass::compile_at(
         &model(),
-        &q(DateRange::Relative("today".into()), Some("America/Los_Angeles")),
+        &q(
+            DateRange::Relative("today".into()),
+            Some("America/Los_Angeles"),
+        ),
         &ctx,
         now,
     )
     .unwrap();
-    assert_eq!(la.params[0], ScalarValue::String("2026-08-08T07:00:00+00:00".into()));
+    assert_eq!(
+        la.params[0],
+        ScalarValue::String("2026-08-08T07:00:00+00:00".into())
+    );
 
     let err = spyglass::compile_at(
         &model(),
@@ -99,8 +113,8 @@ fn absolute_ranges_compile_identically_with_and_without_a_clock() {
 #[test]
 fn clockless_compile_refuses_relative_ranges() {
     let ctx = SecurityContext::default().allow_unscoped();
-    let err = spyglass::compile(&model(), &q(DateRange::Relative("ytd".into()), None), &ctx)
-        .unwrap_err();
+    let err =
+        spyglass::compile(&model(), &q(DateRange::Relative("ytd".into()), None), &ctx).unwrap_err();
     assert!(
         matches!(err, spyglass::CompileError::RelativeDateNeedsClock(_)),
         "got: {err}"
@@ -117,7 +131,10 @@ fn bad_grammar_is_a_typed_error_with_accepted_forms() {
         clock("2026-08-09T00:00:00Z"),
     )
     .unwrap_err();
-    assert!(matches!(err, spyglass::CompileError::BadDateRange(_)), "got: {err}");
+    assert!(
+        matches!(err, spyglass::CompileError::BadDateRange(_)),
+        "got: {err}"
+    );
     assert!(format!("{err}").contains("accepted:"), "got: {err}");
 }
 

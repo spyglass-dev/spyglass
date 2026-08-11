@@ -53,10 +53,24 @@ limit 50";
 #[test]
 fn labelled_dimension_joins_and_searches_on_the_label() {
     // Users type names, not UUIDs: search must match what they SEE.
-    let c = compile_values(&model(), "Orders.customer_id", Some("smith"), Some(10), &scoped())
-        .expect("compiles");
-    assert!(c.sql.contains("left join customers"), "label join: {}", c.sql);
-    assert!(c.sql.contains("\"Customers\".name as \"label\""), "label projected: {}", c.sql);
+    let c = compile_values(
+        &model(),
+        "Orders.customer_id",
+        Some("smith"),
+        Some(10),
+        &scoped(),
+    )
+    .expect("compiles");
+    assert!(
+        c.sql.contains("left join customers"),
+        "label join: {}",
+        c.sql
+    );
+    assert!(
+        c.sql.contains("\"Customers\".name as \"label\""),
+        "label projected: {}",
+        c.sql
+    );
     assert!(
         c.sql.contains("\"Customers\".name::text ilike $1"),
         "search targets the label: {}",
@@ -65,8 +79,16 @@ fn labelled_dimension_joins_and_searches_on_the_label() {
     assert_eq!(c.params[0], ScalarValue::String("%smith%".into()));
     assert!(c.sql.ends_with("limit 10"), "sql: {}", c.sql);
     // Both tenant cubes contribute scope predicates.
-    assert!(c.sql.contains("\"Customers\".tenant_id = $2"), "sql: {}", c.sql);
-    assert!(c.sql.contains("\"Orders\".tenant_id = $3"), "sql: {}", c.sql);
+    assert!(
+        c.sql.contains("\"Customers\".tenant_id = $2"),
+        "sql: {}",
+        c.sql
+    );
+    assert!(
+        c.sql.contains("\"Orders\".tenant_id = $3"),
+        "sql: {}",
+        c.sql
+    );
 }
 
 #[test]
@@ -82,9 +104,18 @@ fn non_filterable_dimensions_are_refused() {
 
 #[test]
 fn unscoped_tenant_cube_fails_closed() {
-    let err = compile_values(&model(), "Orders.status", None, None, &SecurityContext::default())
-        .expect_err("must refuse");
-    assert!(matches!(err, CompileError::MissingTenantScope { .. }), "got: {err}");
+    let err = compile_values(
+        &model(),
+        "Orders.status",
+        None,
+        None,
+        &SecurityContext::default(),
+    )
+    .expect_err("must refuse");
+    assert!(
+        matches!(err, CompileError::MissingTenantScope { .. }),
+        "got: {err}"
+    );
 }
 
 #[test]

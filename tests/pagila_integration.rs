@@ -20,8 +20,14 @@ fn revenue_query(store: i64) -> (Query, SecurityContext) {
     let mut scope = BTreeMap::new();
     scope.insert("Payment.store_id".to_string(), ScalarValue::Int(store));
     (
-        Query { measures: vec!["Payment.revenue".into()], ..Default::default() },
-        SecurityContext { scope, ..Default::default() },
+        Query {
+            measures: vec!["Payment.revenue".into()],
+            ..Default::default()
+        },
+        SecurityContext {
+            scope,
+            ..Default::default()
+        },
     )
 }
 
@@ -53,9 +59,15 @@ async fn pagila_scope_isolates_stores() {
     let v1 = r1.rows[0]["Payment.revenue"].as_f64().expect("revenue 1");
     let v2 = r2.rows[0]["Payment.revenue"].as_f64().expect("revenue 2");
 
-    assert!(v1 > 0.0 && v2 > 0.0, "both stores have revenue: {v1} / {v2}");
+    assert!(
+        v1 > 0.0 && v2 > 0.0,
+        "both stores have revenue: {v1} / {v2}"
+    );
     assert_ne!(v1, v2, "scope must isolate stores: {v1} vs {v2}");
     // Sanity: the generated SQL carries the mandatory scope filter.
-    assert!(r1.sql.unwrap().contains("store_id = $1"), "scope filter present");
+    assert!(
+        r1.sql.unwrap().contains("store_id = $1"),
+        "scope filter present"
+    );
     eprintln!("pagila ok — store1=${v1:.2} store2=${v2:.2}");
 }

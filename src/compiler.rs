@@ -68,7 +68,9 @@ pub enum CompileError {
     BadFillGaps(String),
     #[error("compare: {0}")]
     BadCompare(String),
-    #[error("calculated-measure cycle through '{0}' — load-time validation should have caught this")]
+    #[error(
+        "calculated-measure cycle through '{0}' — load-time validation should have caught this"
+    )]
     CalculatedCycle(String),
     #[error(
         "dimension '{0}' is not marked `filterable: true` — /values serves only the model's \
@@ -200,7 +202,10 @@ fn plan_joins<'a>(model: &'a Model, query: &Query) -> Result<JoinPlan<'a>, Compi
 
     let needed: Vec<&String> = referenced.iter().filter(|n| **n != base_name).collect();
     if needed.is_empty() {
-        return Ok(JoinPlan { base, edges: Vec::new() });
+        return Ok(JoinPlan {
+            base,
+            edges: Vec::new(),
+        });
     }
 
     // BFS from the base over traversable edges. `parent` remembers how each
@@ -234,7 +239,10 @@ fn plan_joins<'a>(model: &'a Model, query: &Query) -> Result<JoinPlan<'a>, Compi
     for target in needed {
         if !parent.contains_key(target) {
             if let Some(from) = blocked.get(target) {
-                return Err(CompileError::FanOut { from: from.clone(), to: target.clone() });
+                return Err(CompileError::FanOut {
+                    from: from.clone(),
+                    to: target.clone(),
+                });
             }
             return Err(CompileError::NoJoinPath {
                 from: base_name.clone(),
@@ -266,7 +274,9 @@ fn plan_joins<'a>(model: &'a Model, query: &Query) -> Result<JoinPlan<'a>, Compi
 /// True for a bare column name that must be qualified in a joined query.
 fn is_simple_ident(s: &str) -> bool {
     !s.is_empty()
-        && s.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && s.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
@@ -335,10 +345,9 @@ fn measure_expr_guarded(
     };
     Ok(match m.measure_type {
         MeasureType::Count => "count(*)".to_string(),
-        MeasureType::CountDistinct => format!(
-            "count(distinct {})",
-            sql.unwrap_or_else(|| "*".to_string())
-        ),
+        MeasureType::CountDistinct => {
+            format!("count(distinct {})", sql.unwrap_or_else(|| "*".to_string()))
+        }
         // Cast numeric aggregates to float8 so engines get a predictable type.
         MeasureType::Sum => format!("sum({})::float8", req_sql(sql, field)?),
         MeasureType::Avg => format!("avg({})::float8", req_sql(sql, field)?),
@@ -359,7 +368,10 @@ fn interpolate_measures(
     stack: &mut Vec<String>,
 ) -> Result<String, CompileError> {
     if stack.iter().any(|f| f == field) {
-        return Err(CompileError::CalculatedCycle(format!("{}.{}", cube.name, field)));
+        return Err(CompileError::CalculatedCycle(format!(
+            "{}.{}",
+            cube.name, field
+        )));
     }
     stack.push(field.to_string());
     let mut out = String::new();
@@ -445,7 +457,11 @@ fn normalize_rows_mode<'q>(
         .drill_members
         .iter()
         .map(|m| {
-            if m.contains('.') { m.clone() } else { format!("{}.{}", base.name, m) }
+            if m.contains('.') {
+                m.clone()
+            } else {
+                format!("{}.{}", base.name, m)
+            }
         })
         .collect();
     let dimensions: Vec<String> = if query.dimensions.is_empty() {
@@ -482,7 +498,10 @@ pub fn compile_values(
     let (_, field) = split_member(member)?;
     // A synthetic single-dimension query drives join planning (the label's
     // cube joins in automatically) and scope enforcement.
-    let synthetic = Query { dimensions: vec![member.to_string()], ..Default::default() };
+    let synthetic = Query {
+        dimensions: vec![member.to_string()],
+        ..Default::default()
+    };
     let plan = plan_joins(model, &synthetic)?;
     let cube = plan.base;
     let dim = cube
@@ -548,10 +567,18 @@ pub fn compile_values(
         sql.push_str(&format!("\nwhere {}", where_parts.join(" and ")));
     }
     sql.push_str(&format!("\ngroup by {}", group_by.join(", ")));
-    sql.push_str(&format!("\norder by {} desc, {} asc", quote("count"), quote("value")));
+    sql.push_str(&format!(
+        "\norder by {} desc, {} asc",
+        quote("count"),
+        quote("value")
+    ));
     sql.push_str(&format!("\nlimit {}", limit.unwrap_or(50).min(500)));
 
-    Ok(Compiled { sql, params, columns })
+    Ok(Compiled {
+        sql,
+        params,
+        columns,
+    })
 }
 
 /// Compile without a clock. Absolute date ranges work as always; a RELATIVE
@@ -635,7 +662,10 @@ fn validate_time_features(query: &Query) -> Result<(), CompileError> {
         }
     };
     for td in &query.time_dimensions {
-        for (name, active) in [("fill_gaps", td.fill_gaps), ("compare", td.compare.is_some())] {
+        for (name, active) in [
+            ("fill_gaps", td.fill_gaps),
+            ("compare", td.compare.is_some()),
+        ] {
             if !active {
                 continue;
             }
@@ -790,7 +820,8 @@ pub fn compile_at(
             .ok_or_else(|| CompileError::UnknownMember(seg.clone()))?;
         where_parts.push(format!("({})", join_condition(&segment.sql, cube, model)));
     }
-    let tz = crate::dates::parse_tz(query.timezone.as_deref()).map_err(CompileError::BadTimezone)?;
+    let tz =
+        crate::dates::parse_tz(query.timezone.as_deref()).map_err(CompileError::BadTimezone)?;
     let mut fill: Option<FillSpec> = None;
     for td in &query.time_dimensions {
         if let Some(range) = &td.date_range {
@@ -806,7 +837,9 @@ pub fn compile_at(
             if td.fill_gaps {
                 fill = Some(FillSpec {
                     alias: td.dimension.clone(),
-                    granularity: td.granularity.expect("validated: fill_gaps has granularity"),
+                    granularity: td
+                        .granularity
+                        .expect("validated: fill_gaps has granularity"),
                     from_param: params.len() - 1,
                     to_param: params.len(),
                 });
@@ -822,7 +855,12 @@ pub fn compile_at(
     for f in measure_filters {
         let (_, field) = split_member(&f.member)?;
         let expr = measure_expr(base, field, has_joins)?;
-        having_parts.push(compile_predicate(&expr, DimensionType::Number, f, &mut params)?);
+        having_parts.push(compile_predicate(
+            &expr,
+            DimensionType::Number,
+            f,
+            &mut params,
+        )?);
     }
 
     // ORDER BY by alias (any selected member).
@@ -899,7 +937,11 @@ pub fn compile_at(
         sql.push_str(&format!("\noffset {offset}"));
     }
 
-    Ok(Compiled { sql, params, columns })
+    Ok(Compiled {
+        sql,
+        params,
+        columns,
+    })
 }
 
 fn compile_filter(
@@ -960,7 +1002,11 @@ fn compile_predicate(
                 params.push(v.clone());
                 placeholders.push(ph(params.len()));
             }
-            let op = if matches!(f.operator, FilterOperator::In) { "in" } else { "not in" };
+            let op = if matches!(f.operator, FilterOperator::In) {
+                "in"
+            } else {
+                "not in"
+            };
             format!("{} {} ({})", expr, op, placeholders.join(", "))
         }
     })

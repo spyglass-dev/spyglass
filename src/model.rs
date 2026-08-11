@@ -134,7 +134,13 @@ impl Model {
                     path.pop();
                 }
                 let before = problems.len();
-                dfs(cube, stack.pop().expect("start"), &mut path, &mut problems, name);
+                dfs(
+                    cube,
+                    stack.pop().expect("start"),
+                    &mut path,
+                    &mut problems,
+                    name,
+                );
                 // One report per cycle is enough; skip the remaining starts
                 // once a cycle in this cube is found.
                 if problems.len() > before {
@@ -142,7 +148,11 @@ impl Model {
                 }
             }
         }
-        if problems.is_empty() { Ok(()) } else { Err(problems) }
+        if problems.is_empty() {
+            Ok(())
+        } else {
+            Err(problems)
+        }
     }
 }
 
@@ -360,7 +370,9 @@ pub(crate) fn sql_refs(sql: &str) -> Vec<&str> {
     let mut refs = Vec::new();
     let mut rest = sql;
     while let Some(start) = rest.find("${") {
-        let Some(len) = rest[start + 2..].find('}') else { break };
+        let Some(len) = rest[start + 2..].find('}') else {
+            break;
+        };
         refs.push(&rest[start + 2..start + 2 + len]);
         rest = &rest[start + 2 + len + 1..];
     }
