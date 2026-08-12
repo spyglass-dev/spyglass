@@ -9,6 +9,7 @@ import { applyDrillTrail, drillStepLabel, routeDrill, type DrillEvent } from '..
 import { parseReportSearch, reportStateToSearch, serializeReportState } from '../urlstate'
 import { DataGrid } from '../components/DataGrid'
 import { DrillBreadcrumb } from '../components/DrillBreadcrumb'
+import { DEFAULT_REPORT_FILTERS } from '../filters'
 import { ReportCanvas } from '../components/ReportCanvas'
 import { rowsQueryFor, type BoundWidget, type Report } from '../report'
 import type { TableSpec } from '../types'
@@ -235,5 +236,41 @@ describe('ReportCanvas default drill-down', () => {
     const query = runQuery.mock.calls[0][0] as { filters?: { member: string }[] }
     expect(query.filters).toEqual([{ member: 'Orders.customer_id', operator: 'equals', values: ['c1'] }])
     expect(screen.getByText(/customer: Karl Seal/)).toBeTruthy()
+  })
+
+  /**
+   * A drill step and a facet compile to the same equality predicate, so a
+   * "Clear" that resets only `filters` leaves the report narrowed by whatever
+   * the user last clicked — it looks like the button does nothing. The trail
+   * lives in the filter bar now, and Clear owns both.
+   */
+  it('Clear resets the filters to their defaults AND drops the drill trail', async () => {
+    const onChange = vi.fn()
+    const drilled: Report = {
+      ...report,
+      filters: { datePreset: 'last_7d', facets: { status: ['paid'] } },
+      drill: [step('Orders.customer_id', 'c1', { label: 'Karl Seal' })],
+    }
+    render(
+      <ReportCanvas
+        report={drilled}
+        onChange={onChange}
+        runQuery={async () => result}
+        facets={[{ key: 'status', label: 'Status', options: [{ value: 'paid', label: 'Paid' }] }]}
+      />,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /clear/i }))
+    const next = onChange.mock.calls.at(-1)?.[0] as Report
+    expect(next.drill).toEqual([])
+    expect(next.filters).toEqual(DEFAULT_REPORT_FILTERS)
+  })
+
+  /** The trail renders in the filter bar even when the report declares no
+   *  facets — otherwise drilling a bare report hides its own undo. */
+  it('shows the drill trail in the filter bar for a report with no facets', async () => {
+    const drilled: Report = { ...report, drill: [step('Orders.customer_id', 'c1', { label: 'Karl Seal' })] }
+    render(<ReportCanvas report={drilled} onChange={() => {}} runQuery={async () => result} />)
+    expect(await screen.findByText(/customer: Karl Seal/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /clear/i })).toBeTruthy()
   })
 })

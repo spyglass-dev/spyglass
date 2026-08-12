@@ -12,7 +12,6 @@ import type { ReportDoc, TableSpec, WidgetSpec } from '../types'
 import type { WidgetRegistry } from '../registry'
 import { Widget } from './Widget'
 import { DataGrid, type GridQueryDelta } from './DataGrid'
-import { DrillBreadcrumb } from './DrillBreadcrumb'
 import { routeDrill, type DrillEvent, type DrillRouter } from '../drill'
 import type { ViewRegistry } from '../views'
 import { applyGridDelta, draftToWidgetSpec } from '../querybuilder'
@@ -223,14 +222,22 @@ export function ReportCanvas({
 
   return (
     <div className="flex flex-col">
-      {facets && filters && (
-        <FilterBar filters={filters} onChange={setFilters} facets={facets} onReset={() => setFilters(DEFAULT_REPORT_FILTERS)} />
-      )}
-
-      {(report.drill?.length ?? 0) > 0 && (
-        <div className="px-1 pt-2">
-          <DrillBreadcrumb trail={report.drill ?? []} onPop={popDrill} />
-        </div>
+      {/* The bar also carries the drill trail, so it must render for a report
+          with NO facets the moment the user drills into something — otherwise
+          the trail (and its undo) vanishes exactly when it is needed. */}
+      {(facets || (report.drill?.length ?? 0) > 0) && (
+        <FilterBar
+          filters={filters ?? DEFAULT_REPORT_FILTERS}
+          onChange={setFilters}
+          facets={facets}
+          drill={report.drill ?? []}
+          onPopDrill={popDrill}
+          // Reset to the host's DEFAULTS *and* drop the drill trail. Clearing
+          // only `filters` left the report narrowed by whatever the user last
+          // clicked — the trail is an equality predicate exactly like a facet,
+          // so a "Clear" that skips it does not clear the report.
+          onReset={() => onChange({ ...report, filters: DEFAULT_REPORT_FILTERS, drill: [] })}
+        />
       )}
 
       <div className="flex flex-col gap-3 p-1 pt-3">
