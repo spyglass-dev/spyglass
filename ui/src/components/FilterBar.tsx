@@ -1,16 +1,24 @@
 /**
  * FilterBar — a report-wide filter strip: a date-range picker, then one control
- * per host-supplied facet. A facet with a few options renders as a chip group;
- * one with many (e.g. Class) renders as a searchable multi-select menu. Facets
- * can be `required` (always shown, prompted until set); optional facets start
- * hidden behind "+ Add filter" so the bar stays uncluttered. Edits a
- * `ReportFilters` object; the host maps that onto its own queries. Tailwind
- * design tokens, so it sits natively in the host's chrome.
+ * per host-supplied facet, then the drill trail. A facet with a few options
+ * renders as a chip group; one with many (e.g. Class) renders as a searchable
+ * multi-select menu. Facets can be `required` (always shown, prompted until
+ * set); optional facets start hidden behind "+ Add filter" so the bar stays
+ * uncluttered. Edits a `ReportFilters` object; the host maps that onto its own
+ * queries. Tailwind design tokens, so it sits natively in the host's chrome.
+ *
+ * THE DRILL TRAIL BELONGS HERE. A drill step and a facet compile to the same
+ * thing — `applyDrillTrail` re-qualifies a step to the widget's cube "mirroring
+ * how report facets apply", and both end up as an equality predicate on the
+ * query. Rendering the trail as a separate strip below the bar made one of the
+ * two invisible to "Clear" and split "what is narrowing this report?" across
+ * two places. One row, one answer.
  */
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { X, Check, ChevronDown, Plus, Search } from 'lucide-react'
 import { DateRangePicker } from './DateRangePicker'
 import { hasActiveFilters, type FilterFacet, type ReportFilters } from '../filters'
+import { drillStepLabel, type DrillTrail } from '../drill'
 
 /** Host control for a facet: receives the current values + a setter, returns a
  *  node to render in place of the default chips/menu (e.g. a native combobox). */
@@ -37,6 +45,8 @@ export function FilterBar({
   filters,
   onChange,
   facets = [],
+  drill = [],
+  onPopDrill,
   onReset,
   renderFacet,
 }: {
@@ -44,7 +54,14 @@ export function FilterBar({
   onChange: (next: ReportFilters) => void
   /** Host-defined facets. Required ones always show; the rest live under "+ Add filter". */
   facets?: FilterFacet[]
-  /** Called by "Clear" — host decides what "reset" means (usually defaults). */
+  /** The drill trail, rendered inline as removable chips — a drill step is a
+   *  filter, so it belongs in the filter row rather than a strip of its own. */
+  drill?: DrillTrail
+  /** Truncate the trail to its first `length` steps (0 = clear the drill). */
+  onPopDrill?: (length: number) => void
+  /** Called by "Clear" — host decides what "reset" means (usually defaults,
+   *  and it must also clear the drill trail, or Clear leaves the report
+   *  narrowed by whatever the user last clicked). */
   onReset?: () => void
   /** Override the control for specific facets with a host component (e.g. a
    *  system combobox). Return `undefined` to keep the default chips/menu. */
@@ -122,11 +139,27 @@ export function FilterBar({
         )
       })}
 
+      {/* Drill steps, as removable chips. Clicking one pops the trail back to
+          just before it — the same undo the breadcrumb gave, in the row that
+          already answers "what is narrowing this report?". */}
+      {drill.map((step, i) => (
+        <button
+          key={`${step.member}-${i}`}
+          type="button"
+          onClick={() => onPopDrill?.(i)}
+          title={`Remove ${drillStepLabel(step)}`}
+          className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:border-primary"
+        >
+          {drillStepLabel(step)}
+          <X className="h-3 w-3" />
+        </button>
+      ))}
+
       {hiddenFacets.length > 0 && (
         <AddFilterMenu facets={hiddenFacets} onAdd={(key) => setRevealed((r) => [...r, key])} />
       )}
 
-      {onReset && hasActiveFilters(filters) && (
+      {onReset && (hasActiveFilters(filters) || drill.length > 0) && (
         <button
           type="button"
           onClick={() => {
