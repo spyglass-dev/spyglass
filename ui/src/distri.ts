@@ -12,6 +12,16 @@ import type { ViewRegistry } from './views'
 import type { FacetSpec } from './report'
 import { FILTER_SPEC_SCHEMA, validateFilterSpec } from './report.schema'
 import { findReferenceQueriesTool, type ExampleIndex } from './reports/references'
+import { checkFacetKeys, warnBakedDateRange } from './reports/guards'
+import {
+  findDuplicate,
+  newWidgetId,
+  sessionState,
+  withWidgetIds,
+  widgetId,
+  type ReportSessionState,
+  type WidgetOutcome,
+} from './reports/session'
 import {
   editWidgetTool,
   getReportTool,
@@ -41,6 +51,17 @@ export interface ReportHost {
   /** Called after `create_report` builds a fresh report. `id` is present when
    *  the host supplied `ReportToolsConfig.save` — hosts navigate on it. */
   onBuilt?(report: Report, id?: string): void
+  /** The persisted id of the open report, when the host has saved it. Drives
+   *  `status: 'saved'` vs `'draft'` — the difference between "change what they
+   *  have" and "finish what you started". */
+  getSavedId?(): string | null
+  /**
+   * What each widget did the last time it ran, keyed by widget id. The canvas
+   * already resolves every bound widget in order to render it; this is that
+   * result, kept where an agent can reach it. Hosts that do not wire it get
+   * `status: 'unresolved'` everywhere, which is honest — never silence.
+   */
+  getOutcomes?(): Map<string, WidgetOutcome> | Record<string, WidgetOutcome> | undefined
 }
 
 /**
@@ -190,23 +211,28 @@ export function createReportTool(
             return ok({ ok: false, error: `Invalid facets: ${detail}` })
           }
           facets = a.facets as FacetSpec[]
+          // A facet over a time dimension can only ever be an empty menu, and
+          // it displaces the date filter the report already has.
+          const badKey = checkFacetKeys(facets, ctx.meta)
+          if (badKey) return ok({ ok: false, error: badKey })
         }
 
-        const widgets = Array.isArray(a.widgets) ? a.widgets.filter(isWidget) : []
+        const widgets = withWidgetIds(Array.isArray(a.widgets) ? a.widgets.filter(isWidget) : [])
         const invalid = validateWidgetQueries(widgets, ctx.meta)
         if (invalid) return ok(invalid)
+        const warning = warnBakedDateRange(widgets)
 
         let report: Report
         if (widgets.length > 0) {
           report = {
             title,
             ...(a.description ? { description: a.description } : {}),
-            widgets: withProvenance(widgets, a.prompt),
+            widgets: withWidgetIds(withProvenance(widgets, a.prompt)),
           }
         } else if (config.entityReport && a.entity?.kind && a.entity.id) {
           const seeded = config.entityReport({ kind: a.entity.kind, id: a.entity.id }, title)
           if (!seeded) return ok({ ok: false, error: `No default report for "${a.entity.kind}".` })
-          report = { ...seeded }
+          report = { ...seeded, widgets: withWidgetIds(seeded.widgets) }
           if (a.description) report.description = a.description
         } else {
           return ok({
@@ -232,7 +258,11 @@ export function createReportTool(
           ok: true,
           widget_count: report.widgets.length,
           ...(id && config.reportPath ? { navigate_to: config.reportPath(id) } : {}),
-          status: 'draft_open',
+          ...(warning ? { warning } : {}),
+          // The state it produced — including whether each widget returned
+          // rows. A report that renders "No data" everywhere is the failure
+          // this codebase has now shipped three times.
+          state: stateOf(host),
         })
       } catch (err) {
         return ok({ ok: false, error: err instanceof Error ? err.message : String(err) })
@@ -249,29 +279,64 @@ export function addWidgetTool(host: ReportHost, ctx: ToolContext = {}): AgentToo
     autoExecute: true,
     name: 'add_report_widget',
     description:
-      'Append ONE widget to the report already open (keeps existing widgets and layout). Pass a single `widget` (prefer a `bound` widget), optional `index`, and the user ask as `prompt` for provenance. Widget vocabulary:\n' +
+      'Add ONE widget to the report already open, keeping every existing widget and the layout. ' +
+      'IDEMPOTENT: pass the `id` of an existing widget to REPLACE it, and adding a widget the ' +
+      'report already contains changes nothing and returns `action: "deduped"` — so a retry is ' +
+      'safe and never doubles anything. Returns the report `state` after the change, including ' +
+      'whether each widget returned rows: read it, because a widget that renders "No data" is the ' +
+      'commonest way a report is wrong. Do NOT put a `dateRange` in the query — the report\'s date ' +
+      'filter owns the window. Widget vocabulary:\n' +
       WIDGET_VOCAB,
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         widget: { type: 'object' },
-        index: { type: 'number' },
+        id: { type: 'string', description: 'Replace the widget with this id (from get_report).' },
+        index: { type: 'number', description: 'Insert position. Omit to append.' },
         prompt: { type: 'string', description: "The user's ask, verbatim (stored as provenance)." },
       },
       required: ['widget'],
     },
     handler: async (input) => {
-      const a = (input ?? {}) as { widget?: unknown; index?: number; prompt?: string }
+      const a = (input ?? {}) as { widget?: unknown; id?: string; index?: number; prompt?: string }
       if (!isWidget(a.widget)) return ok({ ok: false, error: 'Provide a valid `widget`.' })
       const invalid = validateWidgetQueries([a.widget], ctx.meta)
       if (invalid) return ok(invalid)
+
       const current = host.getReport() ?? { title: 'Untitled report', widgets: [] }
-      const widgets = [...current.widgets]
+      const widgets = withWidgetIds(current.widgets).slice()
+      const [incoming] = withProvenance([a.widget], a.prompt)
+      const warning = warnBakedDateRange([a.widget])
+
+      // Replace by id: the retry-safe path, and the one an edit should take.
+      if (a.id) {
+        const at = widgets.findIndex((w) => widgetId(w) === a.id)
+        if (at < 0) {
+          return ok({ ok: false, error: `No widget with id "${a.id}". Call get_report for current ids.` })
+        }
+        widgets[at] = { ...incoming, id: a.id } as ReportWidget
+        host.setReport({ ...current, widgets })
+        return ok({ ok: true, action: 'replaced', id: a.id, ...(warning ? { warning } : {}), state: stateOf(host) })
+      }
+
+      // Already there? Say so and change nothing, rather than a second copy.
+      const dup = findDuplicate(widgets, incoming)
+      if (dup) {
+        return ok({
+          ok: true,
+          action: 'deduped',
+          id: dup.id,
+          note: 'The report already contains this widget; nothing changed.',
+          state: stateOf(host),
+        })
+      }
+
+      const id = newWidgetId()
       const at = typeof a.index === 'number' ? Math.max(0, Math.min(a.index, widgets.length)) : widgets.length
-      widgets.splice(at, 0, ...withProvenance([a.widget], a.prompt))
+      widgets.splice(at, 0, { ...incoming, id } as ReportWidget)
       host.setReport({ ...current, widgets })
-      return ok({ ok: true, widget_count: widgets.length })
+      return ok({ ok: true, action: 'added', id, ...(warning ? { warning } : {}), state: stateOf(host) })
     },
   }
 }
@@ -396,6 +461,31 @@ export function addViewTool(host: ReportHost, ctx: ToolContext): AgentTool {
   }
 }
 
+/**
+ * The state after a transition, returned by every mutating tool.
+ *
+ * An agent that has just called a tool should never have to call another one to
+ * find out what happened — that round trip is where "add a widget" turned into
+ * "add it twice".
+ */
+export function stateOf(host: ReportHost): ReportSessionState {
+  const report = host.getReport()
+  if (report) {
+    // Repair-on-read: a report authored before widget ids existed gets them
+    // here, and they are PERSISTED — reporting an id the document does not
+    // carry would hand the agent a handle that fails on the next call.
+    // `withWidgetIds` returns the same array when nothing is missing, so the
+    // common path writes nothing.
+    const widgets = withWidgetIds(report.widgets)
+    if (widgets !== report.widgets) host.setReport({ ...report, widgets })
+  }
+  return sessionState({
+    report: host.getReport(),
+    savedId: host.getSavedId?.() ?? null,
+    outcomes: host.getOutcomes?.(),
+  })
+}
+
 /** Cubes the open report already queries — context for example ranking. */
 function activeCubes(report: Report | null): string[] {
   const out = new Set<string>()
@@ -439,7 +529,7 @@ export function buildReportTools(
     editWidgetTool(host, ctx),
     removeWidgetTool(host),
     moveWidgetTool(host),
-    setReportFiltersTool(host),
+    setReportFiltersTool(host, ctx),
     renameReportTool(host),
   ]
   if (ctx.runQuery) tools.push(exploreDataTool(ctx))
