@@ -28,6 +28,13 @@ export interface WidgetPromptDialogProps {
   editSuggestions?: string[]
   addTitle?: string
   editTitle?: string
+  /**
+   * An escape hatch offered below the prompt — e.g. "edit the query directly",
+   * opening a manual query builder. Demoted, not removed: describing it is the
+   * default because it is what most people want, but someone who knows exactly
+   * which member they need should not have to spell it out in a sentence.
+   */
+  secondaryAction?: { label: string; onClick: (state: NonNullable<WidgetPromptState>) => void }
 }
 
 export function WidgetPromptDialog({
@@ -38,6 +45,7 @@ export function WidgetPromptDialog({
   editSuggestions = [],
   addTitle = 'Add a widget',
   editTitle = 'Change this widget',
+  secondaryAction,
 }: WidgetPromptDialogProps) {
   const [prompt, setPrompt] = useState('')
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -131,6 +139,19 @@ export function WidgetPromptDialog({
             </div>
           </div>
         </div>
+
+        {secondaryAction && (
+          <button
+            type="button"
+            onClick={() => {
+              onOpenChange(false)
+              secondaryAction.onClick(state)
+            }}
+            className="mt-3 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            {secondaryAction.label}
+          </button>
+        )}
 
         {suggestions.length > 0 && (
           <div className="mt-4 flex flex-wrap gap-2">

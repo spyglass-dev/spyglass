@@ -72,7 +72,14 @@ export interface WidgetQuery {
   timeDimensions?: {
     dimension: string
     granularity?: string
-    dateRange?: [string, string]
+    /**
+     * Either an absolute `[fromISO, toISO)` pair, or the stored INTENT — a
+     * relative phrase (`"last 30 days"`, `"this month"`) the ENGINE resolves
+     * against its own clock on every run (grammar in `src/dates.rs`). A saved
+     * report keeps the phrase, so "last 30 days" still means the last 30 days
+     * a month after it was written.
+     */
+    dateRange?: [string, string] | string
     /** Engine comparison window — `__prev_<measure>` columns come back. */
     compare?: 'previous_period' | 'previous_year'
   }[]

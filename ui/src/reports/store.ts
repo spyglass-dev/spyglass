@@ -11,7 +11,12 @@
  */
 import type { Report } from '../report'
 
-/** The saved document. Hosts may carry extra keys of their own. */
+/**
+ * The saved document. Hosts may carry extra keys of their own, and the store is
+ * generic over the body so a host's own doc type flows through `loadReport` and
+ * `listReports` intact rather than being widened back to this base on the way
+ * out.
+ */
 export type ReportBody = Report & { created_at?: number; updated_at?: number }
 
 /** One saved report row's `data` payload (matches `ReportItemData`). */
@@ -29,17 +34,17 @@ export interface ReportCollection {
   delete(id: string): Promise<unknown>
 }
 
-export interface SavedReport {
+export interface SavedReport<B extends ReportBody = ReportBody> {
   id: string
   title: string
-  body: ReportBody
+  body: B
   updated_at: number
 }
 
-export interface ReportStore {
-  saveReport(id: string, body: ReportBody): Promise<void>
-  loadReport(id: string): Promise<SavedReport | null>
-  listReports(): Promise<SavedReport[]>
+export interface ReportStore<B extends ReportBody = ReportBody> {
+  saveReport(id: string, body: B): Promise<void>
+  loadReport(id: string): Promise<SavedReport<B> | null>
+  listReports(): Promise<SavedReport<B>[]>
   deleteReport(id: string): Promise<void>
 }
 
@@ -49,9 +54,11 @@ export interface ReportStore {
  * crash the list/builder on `body.widgets.length`, normalize to a doc with an
  * empty widget list so legacy reports render (empty) and can be deleted.
  */
-function normalizeDoc(raw: unknown, fallbackTitle: string): ReportBody {
+function normalizeDoc<B extends ReportBody>(raw: unknown, fallbackTitle: string): B {
   const d = (raw ?? {}) as Partial<ReportBody>
   return {
+    // Spread first: a host's own keys survive a round trip through the store.
+    ...(d as object),
     title: typeof d.title === 'string' && d.title ? d.title : fallbackTitle,
     description: typeof d.description === 'string' ? d.description : undefined,
     widgets: Array.isArray(d.widgets) ? d.widgets : [],
@@ -62,7 +69,7 @@ function normalizeDoc(raw: unknown, fallbackTitle: string): ReportBody {
     ...(d.filters && typeof d.filters === 'object' ? { filters: d.filters } : {}),
     created_at: typeof d.created_at === 'number' ? d.created_at : undefined,
     updated_at: typeof d.updated_at === 'number' ? d.updated_at : undefined,
-  }
+  } as B
 }
 
 /** Mint a new report id. */
@@ -71,18 +78,20 @@ export function newReportId(): string {
 }
 
 /** Bind the report CRUD to one IDB collection. */
-export function createReportStore(collection: ReportCollection): ReportStore {
+export function createReportStore<B extends ReportBody = ReportBody>(
+  collection: ReportCollection,
+): ReportStore<B> {
   return {
-    async saveReport(id: string, body: ReportBody): Promise<void> {
+    async saveReport(id: string, body: B): Promise<void> {
       const updated_at = Date.now()
-      const next: ReportBody = { ...body, updated_at }
+      const next: B = { ...body, updated_at }
       await collection.put({
         id,
         data: { title: body.title || 'Untitled report', body: next, updated_at },
       })
     },
 
-    async loadReport(id: string): Promise<SavedReport | null> {
+    async loadReport(id: string): Promise<SavedReport<B> | null> {
       const row = await collection.get(id).catch(() => null)
       if (!row?.data) return null
       const d = row.data
@@ -90,14 +99,14 @@ export function createReportStore(collection: ReportCollection): ReportStore {
       return {
         id,
         title,
-        body: normalizeDoc(d.body, title),
+        body: normalizeDoc<B>(d.body, title),
         updated_at: typeof d.updated_at === 'number' ? d.updated_at : 0,
       }
     },
 
-    async listReports(): Promise<SavedReport[]> {
+    async listReports(): Promise<SavedReport<B>[]> {
       const rows = await collection.list().catch(() => [])
-      const out: SavedReport[] = []
+      const out: SavedReport<B>[] = []
       for (const row of rows) {
         if (!row.data) continue
         const d = row.data
@@ -105,7 +114,7 @@ export function createReportStore(collection: ReportCollection): ReportStore {
         out.push({
           id: row.id,
           title,
-          body: normalizeDoc(d.body, title),
+          body: normalizeDoc<B>(d.body, title),
           updated_at: typeof d.updated_at === 'number' ? d.updated_at : 0,
         })
       }

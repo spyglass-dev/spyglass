@@ -58,7 +58,11 @@ export { QueryBuilder } from './components/QueryBuilder'
 export { ReportCanvas, type ReportCanvasProps } from './components/ReportCanvas'
 export { WidgetError, humanizeWidgetError, type WidgetErrorData } from './components/WidgetError'
 export { ReportLoading } from './components/ReportLoading'
-export { ReportEmptyState, type ReportEmptyStateProps } from './components/ReportEmptyState'
+export {
+  ReportEmptyState,
+  type EmptyStateSuggestion,
+  type ReportEmptyStateProps,
+} from './components/ReportEmptyState'
 export {
   WidgetPromptDialog,
   type WidgetPromptDialogProps,

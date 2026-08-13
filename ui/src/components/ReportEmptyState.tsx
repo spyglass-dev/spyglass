@@ -6,13 +6,20 @@
  */
 import { useState } from 'react'
 
+/** A quick-start chip. A bare string is both the label and the request; the
+ *  object form lets a short chip send a long, specific prompt. */
+export type EmptyStateSuggestion = string | { label: string; prompt: string }
+
 export interface ReportEmptyStateProps {
   onDescribe: (text: string) => void
   title?: string
   subtitle?: string
   placeholder?: string
   /** Quick-start prompts rendered as chips. */
-  suggestions?: string[]
+  suggestions?: EmptyStateSuggestion[]
+  /** Disable the whole hero once a request is in flight — a second click
+   *  otherwise sends a second build. */
+  busy?: boolean
   /** Verb on the primary button. */
   cta?: string
   /** Optional secondary action (e.g. "add a widget by hand"). */
@@ -27,13 +34,15 @@ export function ReportEmptyState({
   placeholder = 'e.g. Weekly overview — the headline numbers and who needs attention',
   suggestions = [],
   cta = 'Build',
+  busy = false,
   onSecondary,
   secondaryLabel = 'or add a widget by hand',
 }: ReportEmptyStateProps) {
   const [prompt, setPrompt] = useState('')
   const submit = (text: string) => {
     const t = text.trim()
-    if (t) onDescribe(t)
+    if (!t || busy) return
+    onDescribe(t)
     setPrompt('')
   }
   return (
@@ -58,7 +67,7 @@ export function ReportEmptyState({
           <span className="pl-2 text-xs text-muted-foreground">⌘↵ to build</span>
           <button
             type="button"
-            disabled={!prompt.trim()}
+            disabled={!prompt.trim() || busy}
             onClick={() => submit(prompt)}
             className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
           >
@@ -69,16 +78,21 @@ export function ReportEmptyState({
 
       {suggestions.length > 0 && (
         <div className="mt-5 flex flex-wrap justify-center gap-2">
-          {suggestions.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => submit(s)}
-              className="rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-primary/50 hover:bg-primary/5"
-            >
-              {s}
-            </button>
-          ))}
+          {suggestions.map((s) => {
+            const label = typeof s === 'string' ? s : s.label
+            const prompt = typeof s === 'string' ? s : s.prompt
+            return (
+              <button
+                key={label}
+                type="button"
+                disabled={busy}
+                onClick={() => submit(prompt)}
+                className="rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-primary/50 hover:bg-primary/5 disabled:opacity-50"
+              >
+                {label}
+              </button>
+            )
+          })}
         </div>
       )}
 

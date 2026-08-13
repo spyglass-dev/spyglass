@@ -12,10 +12,10 @@ import type { ReportBody } from './store'
 import type { ReportStore, SavedReport } from './store'
 
 /** The server row (`models::Report` serialized). */
-interface ServerReport {
+interface ServerReport<B extends ReportBody = ReportBody> {
   id: string
   title: string
-  doc: ReportBody
+  doc: B
   visibility: 'private' | 'workspace' | 'link'
   share_token: string | null
   current_version: number
@@ -29,7 +29,7 @@ export type ReportApiFetch = <T>(
   options?: { method?: string; body?: string },
 ) => Promise<T>
 
-const toSaved = (r: ServerReport): SavedReport => ({
+const toSaved = <B extends ReportBody>(r: ServerReport<B>): SavedReport<B> => ({
   id: r.id,
   title: r.title,
   body: r.doc,
@@ -40,11 +40,11 @@ const toSaved = (r: ServerReport): SavedReport => ({
  * Bind the server API (`/admin/reports` or `/superadmin/reports`) over an
  * offline IDB store. Same `ReportStore` interface the builders already use.
  */
-export function createServerReportStore(
+export function createServerReportStore<B extends ReportBody = ReportBody>(
   apiFetch: ReportApiFetch,
   base: string,
-  offline: ReportStore,
-): ReportStore {
+  offline: ReportStore<B>,
+): ReportStore<B> {
   const swallow = (e: unknown) => {
     // Offline or unauthenticated: the IDB copy remains authoritative until
     // the next successful sync. Log for debuggability, never throw — a save
@@ -53,11 +53,11 @@ export function createServerReportStore(
   }
 
   return {
-    async saveReport(id: string, body: ReportBody): Promise<void> {
+    async saveReport(id: string, body: B): Promise<void> {
       await offline.saveReport(id, body)
       const title = (body as { title?: string }).title || 'Untitled report'
       try {
-        await apiFetch<ServerReport>(`${base}/${id}`, {
+        await apiFetch<ServerReport<B>>(`${base}/${id}`, {
           method: 'PUT',
           body: JSON.stringify({ title, doc: body }),
         })
@@ -65,7 +65,7 @@ export function createServerReportStore(
         // Unknown on the server yet (or stale id) → create with OUR id so
         // the offline copy and the server row stay one record.
         try {
-          await apiFetch<ServerReport>(base, {
+          await apiFetch<ServerReport<B>>(base, {
             method: 'POST',
             body: JSON.stringify({ id, title, doc: body }),
           })
@@ -75,18 +75,18 @@ export function createServerReportStore(
       }
     },
 
-    async loadReport(id: string): Promise<SavedReport | null> {
+    async loadReport(id: string): Promise<SavedReport<B> | null> {
       try {
-        return toSaved(await apiFetch<ServerReport>(`${base}/${id}`))
+        return toSaved(await apiFetch<ServerReport<B>>(`${base}/${id}`))
       } catch {
         return offline.loadReport(id)
       }
     },
 
-    async listReports(): Promise<SavedReport[]> {
-      const local = await offline.listReports().catch(() => [] as SavedReport[])
+    async listReports(): Promise<SavedReport<B>[]> {
+      const local = await offline.listReports().catch(() => [] as SavedReport<B>[])
       try {
-        const server = (await apiFetch<ServerReport[]>(base)).map(toSaved)
+        const server = (await apiFetch<ServerReport<B>[]>(base)).map(toSaved)
         const serverIds = new Set(server.map((r) => r.id))
         // Local-only drafts (authored offline, never synced) stay visible.
         return [...server, ...local.filter((r) => !serverIds.has(r.id))].sort(
