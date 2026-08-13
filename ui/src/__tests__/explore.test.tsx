@@ -139,9 +139,17 @@ describe('report tools with context', () => {
     return h
   }
 
+  /** Select by NAME: the tool list is ordered for the agent (get_report leads),
+   *  not for the tests, so positional access silently grabs the wrong tool. */
+  const tool = (h: ReportHost, name: string, ctx = { meta: META }) => {
+    const t = buildReportTools(h, ctx).find((x) => x.name === name)
+    if (!t) throw new Error(`no tool ${name}`)
+    return t
+  }
+
   it('create_report stamps agent provenance with the prompt', async () => {
     const h = host()
-    const [create] = buildReportTools(h, { meta: META })
+    const create = tool(h, 'create_report')
     await create.handler({
       title: 'T',
       prompt: 'revenue by rating',
@@ -154,7 +162,7 @@ describe('report tools with context', () => {
 
   it('create_report refuses an invalid bound query with suggestions', async () => {
     const h = host()
-    const [create] = buildReportTools(h, { meta: META })
+    const create = tool(h, 'create_report')
     const [out] = await create.handler({
       title: 'T',
       widgets: [{ type: 'bound', as: 'chart', query: { measures: ['Payments.revenu'] } }],
@@ -164,7 +172,16 @@ describe('report tools with context', () => {
   })
 
   it('buildReportTools includes explore_data only with a runner', () => {
-    expect(buildReportTools(host(), {}).map((t) => t.name)).toEqual(['create_report', 'add_report_widget'])
+    expect(buildReportTools(host(), {}).map((t) => t.name)).toEqual([
+      'get_report',
+      'create_report',
+      'add_report_widget',
+      'edit_report_widget',
+      'remove_report_widget',
+      'move_report_widget',
+      'set_report_filters',
+      'rename_report',
+    ])
     expect(buildReportTools(host(), { runQuery: async () => ({ columns: [], rows: [] }) }).map((t) => t.name)).toContain(
       'explore_data',
     )
