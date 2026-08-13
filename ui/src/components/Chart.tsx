@@ -112,15 +112,50 @@ function xType(
  *  nested accessor. Our members look like `Submissions.submitted` but the row
  *  keys are flat, so an unescaped dot would look up `datum.Submissions.submitted`
  *  (undefined) and render an empty chart. */
-const esc = (field: string) => field.replace(/\./g, '\\.')
+const esc = (field: unknown) => String(field ?? '').replace(/\./g, '\\.')
+
+/**
+ * `y` as an ARRAY means "these measures on one chart" — two lines, submissions
+ * against graded. An agent asks for it constantly and it is the obvious reading
+ * of the field, so support it rather than refuse it: fold the rows into long
+ * form (one row per measure per x) and let `color` split the series.
+ *
+ * Before this, an array `y` reached `field.replace` and threw, which took the
+ * whole page down — one agent-authored widget, a white screen, no report.
+ */
+function foldSeries(
+  values: Record<string, unknown>[],
+  ys: string[],
+  xField: string,
+): { values: Record<string, unknown>[]; y: string; color: string } {
+  const out: Record<string, unknown>[] = []
+  for (const row of values) {
+    for (const y of ys) {
+      out.push({ [xField]: row[xField], _series: y.split('.').pop() ?? y, _value: row[y] })
+    }
+  }
+  return { values: out, y: '_value', color: '_series' }
+}
 
 /** Compile a compact `ChartSpec.chart` into a Vega-Lite spec. */
 function toVegaLite(chart: ChartSpec['chart']): VlSpec {
-  const { mark, x, y, color, stack, format } = chart
+  const { mark, x, stack, format } = chart
+  let { y, color } = chart as { y: string | string[]; color?: string }
   // Synthesize an index field when no x is given (parity with label fallback).
   const hasX = Boolean(x)
   const xField = hasX ? (x as string) : '_i'
-  const values = chart.series.map((r, i) => (hasX ? r : { ...r, _i: i + 1 }))
+  let values = chart.series.map((r, i) => (hasX ? r : { ...r, _i: i + 1 }))
+
+  if (Array.isArray(y)) {
+    if (y.length > 1) {
+      const folded = foldSeries(values, y, xField)
+      values = folded.values
+      y = folded.y
+      color = color ?? folded.color
+    } else {
+      y = y[0] ?? ''
+    }
+  }
 
   const vmark = mark === 'progress' ? 'bar' : mark
   const xt = xType(values, hasX ? xField : undefined, mark)

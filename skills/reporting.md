@@ -66,6 +66,47 @@ the order they are used in is part of the contract, not a preference:
    today's data supports it. Look at the rows before you build a widget on them.
 3. **`create_report`** / **`add_report_widget`** — build.
 
+### The report has a state, and the tools report it
+
+`get_report` returns a `state` — and so does every tool that changes anything,
+so you never need a second call to learn what happened.
+
+```
+   none ──create_report──▸ draft ──host saves──▸ saved
+    ▲                        │                    │
+    └── add / edit / remove / move / set_filters / rename ──┘
+              (these keep the state; they never replace the report)
+```
+
+`none` means nothing is open: only `create_report` applies. `draft` or `saved`
+means a report is on screen — **edit it**. `create_report` REPLACES what the
+reader is looking at.
+
+Widgets carry a stable `id` as well as an `index`. Prefer the id: an index moves
+the moment anything is removed or reordered. `add_report_widget` is idempotent —
+pass an `id` to replace, and re-adding an identical widget returns
+`action: "deduped"` and changes nothing.
+
+### After building, read the outcomes
+
+Every widget in `state.widgets` carries an `outcome`: `ok` (with `row_count` and
+a `sample`), `empty`, `error`, or `unresolved`. **An `empty` widget renders
+"No data" to the reader — that is a bug to fix, not a result to report.**
+`get_report` names them under `attention`, and `outcome.applied` shows the
+facets and date field the framework put on top of your query, which is usually
+why it came back empty.
+
+### Two rules that produce an empty report when broken
+
+**Never put a `dateRange` in a widget query.** The report has one date filter
+and the reader owns it; a widget that pins its own window ignores it, and the
+filter bar becomes decorative. `granularity` is not a window — it is the shape
+of a trend.
+
+**A facet key is never a time dimension.** A facet is a value the reader picks;
+every report already has a date range, so a facet over a date can only be an
+empty menu. The tools refuse it.
+
 ### Editing what is already on screen
 
 If the user refers to the report in front of them — *"add a filter"*, *"make

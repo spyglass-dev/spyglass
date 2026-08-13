@@ -10,6 +10,7 @@
  * object in memory; nothing here imports a storage library.
  */
 import type { Report } from '../report'
+import { withWidgetIds } from './session'
 
 /**
  * The saved document. Hosts may carry extra keys of their own, and the store is
@@ -61,7 +62,9 @@ function normalizeDoc<B extends ReportBody>(raw: unknown, fallbackTitle: string)
     ...(d as object),
     title: typeof d.title === 'string' && d.title ? d.title : fallbackTitle,
     description: typeof d.description === 'string' ? d.description : undefined,
-    widgets: Array.isArray(d.widgets) ? d.widgets : [],
+    // Backfill widget ids on load, so a report saved before ids existed becomes
+    // addressable the first time it is opened — no migration, no version bump.
+    widgets: withWidgetIds(Array.isArray(d.widgets) ? d.widgets : []),
     // Preserve the declared filter spec + selected values across a reload —
     // dropping them silently reverted custom specs to the default and lost the
     // teacher's filter selections.
