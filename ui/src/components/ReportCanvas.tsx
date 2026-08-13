@@ -11,6 +11,7 @@ import { RefreshCw, Plus, Trash2, Pencil, TriangleAlert, Sparkles } from 'lucide
 import type { ReportDoc, TableSpec, WidgetSpec } from '../types'
 import type { WidgetRegistry } from '../registry'
 import { Widget } from './Widget'
+import { WidgetBoundary } from './WidgetBoundary'
 import { DataGrid, type GridQueryDelta } from './DataGrid'
 import { routeDrill, type DrillEvent, type DrillRouter } from '../drill'
 import type { ViewRegistry } from '../views'
@@ -302,16 +303,21 @@ export function ReportCanvas({
                       {skipped && <AllTimeChip reason={skipped} />}
                     </div>
                   )}
-                  <Widget
-                    spec={spec}
-                    registry={mergedRegistry}
-                    views={views}
-                    filters={filters}
-                    onGridQuery={source?.type === 'bound' ? gridQueryAt(i) : undefined}
-                    onDrill={source?.type === 'bound' || source?.type === 'view' ? onDrill : undefined}
-                    onMeasureClick={source?.type === 'bound' ? measureClickAt(i) : undefined}
-                    onRefresh={refresh}
-                  />
+                  {/* One widget with a shape nothing validated must not
+                      unmount the report. A two-measure line chart did exactly
+                      that and left a white screen. */}
+                  <WidgetBoundary title={(spec as { title?: string }).title}>
+                    <Widget
+                      spec={spec}
+                      registry={mergedRegistry}
+                      views={views}
+                      filters={filters}
+                      onGridQuery={source?.type === 'bound' ? gridQueryAt(i) : undefined}
+                      onDrill={source?.type === 'bound' || source?.type === 'view' ? onDrill : undefined}
+                      onMeasureClick={source?.type === 'bound' ? measureClickAt(i) : undefined}
+                      onRefresh={refresh}
+                    />
+                  </WidgetBoundary>
                   <div className="absolute right-1 top-1 flex gap-1 opacity-0 transition-opacity group-hover/w:opacity-100">
                     {editable && (
                       <button type="button" onClick={() => onEditWidget!(source, i)} aria-label="Edit widget" className="flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:border-primary hover:text-primary">
