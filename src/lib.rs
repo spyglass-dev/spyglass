@@ -37,7 +37,7 @@ pub mod query;
 pub mod report;
 
 pub use analyze::{AnalyzeFilter, AnalyzeOptions, ColumnProfile, DbProfile, TableProfile};
-pub use compiler::{compile, compile_at, CompileError, Compiled};
+pub use compiler::{compile, compile_at, compile_at_for, CompileError, Compiled, Dialect};
 pub use context::SecurityContext;
 pub use introspect::{ColumnDef, RawSchema, TableDef};
 pub use logging::{
@@ -56,3 +56,6 @@ pub use report::{resolve_widget, BoundReport, BoundWidget, ChartHint};
 
 #[cfg(feature = "postgres")]
 pub use engine::postgres::PostgresEngine;
+
+#[cfg(feature = "clickhouse")]
+pub use engine::clickhouse::ClickHouseEngine;

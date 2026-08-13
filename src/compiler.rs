@@ -91,6 +91,24 @@ pub struct Compiled {
 /// rows/columns and surfaces it as `QueryResult.total`.
 pub const TOTAL_ALIAS: &str = "__total";
 
+/// The SQL dialect a statement is compiled for.
+///
+/// One compiler, parameterized where the dialects genuinely differ —
+/// placeholder syntax, casts, and text coercion — rather than a compiler per
+/// engine, which would be N copies of the join planner and N places for the
+/// fail-closed tenant rule to drift apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Dialect {
+    /// `$n` placeholders, `::type` casts. The default.
+    #[default]
+    Postgres,
+    /// `{pn:String}` server-side parameters (the HTTP interface's syntax);
+    /// every parameter is declared as `String` and coerced in SQL —
+    /// `toFloat64(...)`, `parseDateTimeBestEffort(...)` — mirroring the
+    /// Postgres engine's bind-as-text-and-cast strategy.
+    ClickHouse,
+}
+
 fn split_member(member: &str) -> Result<(&str, &str), CompileError> {
     member
         .split_once('.')
@@ -317,14 +335,20 @@ fn dimension_expr(
     Ok((qualify_expr(&raw, cube, has_joins), d.dimension_type))
 }
 
-fn measure_expr(cube: &Cube, field: &str, has_joins: bool) -> Result<String, CompileError> {
-    measure_expr_guarded(cube, field, has_joins, &mut Vec::new())
+fn measure_expr(
+    cube: &Cube,
+    field: &str,
+    has_joins: bool,
+    dialect: Dialect,
+) -> Result<String, CompileError> {
+    measure_expr_guarded(cube, field, has_joins, dialect, &mut Vec::new())
 }
 
 fn measure_expr_guarded(
     cube: &Cube,
     field: &str,
     has_joins: bool,
+    dialect: Dialect,
     stack: &mut Vec<String>,
 ) -> Result<String, CompileError> {
     let m = cube
@@ -337,23 +361,27 @@ fn measure_expr_guarded(
     // declarable. Only declared members interpolate, so injection-safety is
     // preserved by construction; cycles are refused (validated at load too).
     let sql = match (&m.sql, m.measure_type) {
-        (Some(sql), MeasureType::Number) => {
-            Some(interpolate_measures(cube, field, sql, has_joins, stack)?)
-        }
+        (Some(sql), MeasureType::Number) => Some(interpolate_measures(
+            cube, field, sql, has_joins, dialect, stack,
+        )?),
         (Some(sql), _) => Some(qualify_expr(sql, cube, has_joins)),
         (None, _) => None,
+    };
+    // Cast numeric aggregates to a double so engines get a predictable type.
+    let float = |expr: String| match dialect {
+        Dialect::Postgres => format!("{expr}::float8"),
+        Dialect::ClickHouse => format!("toFloat64({expr})"),
     };
     Ok(match m.measure_type {
         MeasureType::Count => "count(*)".to_string(),
         MeasureType::CountDistinct => {
             format!("count(distinct {})", sql.unwrap_or_else(|| "*".to_string()))
         }
-        // Cast numeric aggregates to float8 so engines get a predictable type.
-        MeasureType::Sum => format!("sum({})::float8", req_sql(sql, field)?),
-        MeasureType::Avg => format!("avg({})::float8", req_sql(sql, field)?),
-        MeasureType::Min => format!("min({})::float8", req_sql(sql, field)?),
-        MeasureType::Max => format!("max({})::float8", req_sql(sql, field)?),
-        MeasureType::Number => format!("({})::float8", req_sql(sql, field)?),
+        MeasureType::Sum => float(format!("sum({})", req_sql(sql, field)?)),
+        MeasureType::Avg => float(format!("avg({})", req_sql(sql, field)?)),
+        MeasureType::Min => float(format!("min({})", req_sql(sql, field)?)),
+        MeasureType::Max => float(format!("max({})", req_sql(sql, field)?)),
+        MeasureType::Number => float(format!("({})", req_sql(sql, field)?)),
     })
 }
 
@@ -365,6 +393,7 @@ fn interpolate_measures(
     field: &str,
     sql: &str,
     has_joins: bool,
+    dialect: Dialect,
     stack: &mut Vec<String>,
 ) -> Result<String, CompileError> {
     if stack.iter().any(|f| f == field) {
@@ -387,7 +416,9 @@ fn interpolate_measures(
         let token = &after[..len];
         match token.split_once('.') {
             Some((target, member)) if target == "CUBE" || target == cube.name => {
-                out.push_str(&measure_expr_guarded(cube, member, has_joins, stack)?);
+                out.push_str(&measure_expr_guarded(
+                    cube, member, has_joins, dialect, stack,
+                )?);
             }
             None if token == "CUBE" => out.push_str("${CUBE}"),
             _ => {
@@ -428,9 +459,36 @@ fn cast_for(dim_type: DimensionType) -> &'static str {
     }
 }
 
-/// A bind placeholder (`$n`) with the type cast for `dim_type`.
-fn placeholder(idx: usize, dim_type: DimensionType) -> String {
-    format!("${}{}", idx, cast_for(dim_type))
+/// A bind placeholder with the type coercion for `dim_type`.
+///
+/// Both dialects follow the same strategy — every parameter travels as text
+/// and the statement coerces it to the column's type — so the two arms differ
+/// in syntax, never in meaning. ClickHouse parameters are `{pn:String}` (the
+/// server-side parameter syntax its HTTP interface binds, never interpolated),
+/// and `parseDateTimeBestEffort` is what accepts the same ISO-8601 strings
+/// Postgres's `::timestamptz` does.
+fn placeholder(idx: usize, dim_type: DimensionType, dialect: Dialect) -> String {
+    match dialect {
+        Dialect::Postgres => format!("${}{}", idx, cast_for(dim_type)),
+        Dialect::ClickHouse => {
+            let p = format!("{{p{idx}:String}}");
+            match dim_type {
+                DimensionType::String => p,
+                DimensionType::Number => format!("toFloat64({p})"),
+                DimensionType::Time => format!("parseDateTimeBestEffort({p})"),
+                DimensionType::Boolean => format!("({p} = 'true')"),
+            }
+        }
+    }
+}
+
+/// Project an expression as text — the coercion behind time buckets and
+/// `contains` matching.
+fn as_text(expr: &str, dialect: Dialect) -> String {
+    match dialect {
+        Dialect::Postgres => format!("{expr}::text"),
+        Dialect::ClickHouse => format!("toString({expr})"),
+    }
 }
 
 /// Normalize a `mode: rows` query: no measures, and the projection becomes
@@ -495,6 +553,18 @@ pub fn compile_values(
     limit: Option<u32>,
     ctx: &SecurityContext,
 ) -> Result<Compiled, CompileError> {
+    compile_values_for(model, member, search, limit, ctx, Dialect::Postgres)
+}
+
+/// [`compile_values`] for a specific [`Dialect`].
+pub fn compile_values_for(
+    model: &Model,
+    member: &str,
+    search: Option<&str>,
+    limit: Option<u32>,
+    ctx: &SecurityContext,
+    dialect: Dialect,
+) -> Result<Compiled, CompileError> {
     let (_, field) = split_member(member)?;
     // A synthetic single-dimension query drives join planning (the label's
     // cube joins in automatically) and scope enforcement.
@@ -541,9 +611,20 @@ pub fn compile_values(
     if let Some(s) = search.map(str::trim).filter(|s| !s.is_empty()) {
         let target = label_expr.as_deref().unwrap_or(&value_expr);
         params.push(ScalarValue::String(format!("%{s}%")));
-        where_parts.push(format!("{}::text ilike ${}", target, params.len()));
+        where_parts.push(format!(
+            "{} ilike {}",
+            as_text(target, dialect),
+            placeholder(params.len(), DimensionType::String, dialect)
+        ));
     }
-    apply_scope(&plan, ctx, has_joins, &mut params, &mut where_parts)?;
+    apply_scope(
+        &plan,
+        ctx,
+        has_joins,
+        dialect,
+        &mut params,
+        &mut where_parts,
+    )?;
 
     let mut sql = format!(
         "select {}\nfrom {} as {}",
@@ -594,6 +675,7 @@ fn apply_scope(
     plan: &JoinPlan,
     ctx: &SecurityContext,
     has_joins: bool,
+    dialect: Dialect,
     params: &mut Vec<ScalarValue>,
     where_parts: &mut Vec<String>,
 ) -> Result<(), CompileError> {
@@ -625,7 +707,11 @@ fn apply_scope(
         let cube = plan.cube_for(member)?;
         let (expr, dt) = dimension_expr(cube, field, has_joins)?;
         params.push(value.clone());
-        where_parts.push(format!("{} = {}", expr, placeholder(params.len(), dt)));
+        where_parts.push(format!(
+            "{} = {}",
+            expr,
+            placeholder(params.len(), dt, dialect)
+        ));
     }
     Ok(())
 }
@@ -698,6 +784,19 @@ pub fn compile_at(
     ctx: &SecurityContext,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<Compiled, CompileError> {
+    compile_at_for(model, query, ctx, now, Dialect::Postgres)
+}
+
+/// [`compile_at`] for a specific [`Dialect`]. Everything but the placeholder
+/// and coercion syntax — join planning, scope injection, the fail-closed
+/// tenant rule — is shared, so the dialects cannot drift apart on semantics.
+pub fn compile_at_for(
+    model: &Model,
+    query: &Query,
+    ctx: &SecurityContext,
+    now: chrono::DateTime<chrono::Utc>,
+    dialect: Dialect,
+) -> Result<Compiled, CompileError> {
     validate_time_features(query)?;
     let normalized = normalize_rows_mode(model, query)?;
     let query: &Query = normalized.as_ref();
@@ -761,7 +860,7 @@ pub fn compile_at(
         let (_, field) = split_member(&td.dimension)?;
         let cube = plan.cube_for(&td.dimension)?;
         let (expr, _) = dimension_expr(cube, field, has_joins)?;
-        let projected = format!("date_trunc('{}', {})::text", g.as_pg(), expr);
+        let projected = as_text(&format!("date_trunc('{}', {})", g.as_pg(), expr), dialect);
         select.push(format!("{} as {}", projected, quote(&td.dimension)));
         if !is_rows {
             group_by.push(projected);
@@ -772,7 +871,7 @@ pub fn compile_at(
     // Measures (aggregations) — always on the base cube, by construction.
     for member in &query.measures {
         let (_, field) = split_member(member)?;
-        let expr = measure_expr(base, field, has_joins)?;
+        let expr = measure_expr(base, field, has_joins, dialect)?;
         select.push(format!("{} as {}", expr, quote(member)));
         columns.push(Column::new(member.clone(), "measure"));
     }
@@ -806,7 +905,7 @@ pub fn compile_at(
             measure_filters.push(f);
             continue;
         }
-        where_parts.push(compile_filter(cube, has_joins, f, &mut params)?);
+        where_parts.push(compile_filter(cube, has_joins, f, &mut params, dialect)?);
     }
     // Segments: named model-declared predicates, parenthesized into WHERE.
     // The segment's cube is already a participant (referenced_cubes), so its
@@ -831,9 +930,17 @@ pub fn compile_at(
             let cube = plan.cube_for(&td.dimension)?;
             let (expr, dt) = dimension_expr(cube, field, has_joins)?;
             params.push(ScalarValue::String(from));
-            where_parts.push(format!("{} >= {}", expr, placeholder(params.len(), dt)));
+            where_parts.push(format!(
+                "{} >= {}",
+                expr,
+                placeholder(params.len(), dt, dialect)
+            ));
             params.push(ScalarValue::String(to));
-            where_parts.push(format!("{} < {}", expr, placeholder(params.len(), dt)));
+            where_parts.push(format!(
+                "{} < {}",
+                expr,
+                placeholder(params.len(), dt, dialect)
+            ));
             if td.fill_gaps {
                 fill = Some(FillSpec {
                     alias: td.dimension.clone(),
@@ -846,7 +953,14 @@ pub fn compile_at(
             }
         }
     }
-    apply_scope(&plan, ctx, has_joins, &mut params, &mut where_parts)?;
+    apply_scope(
+        &plan,
+        ctx,
+        has_joins,
+        dialect,
+        &mut params,
+        &mut where_parts,
+    )?;
 
     // HAVING: measure filters, compiled against the aggregate expression.
     // This is what makes "the worst N" buildable. Compiled last so the bind
@@ -854,12 +968,13 @@ pub fn compile_at(
     let mut having_parts: Vec<String> = Vec::new();
     for f in measure_filters {
         let (_, field) = split_member(&f.member)?;
-        let expr = measure_expr(base, field, has_joins)?;
+        let expr = measure_expr(base, field, has_joins, dialect)?;
         having_parts.push(compile_predicate(
             &expr,
             DimensionType::Number,
             f,
             &mut params,
+            dialect,
         )?);
     }
 
@@ -904,6 +1019,17 @@ pub fn compile_at(
     // window's buckets, so an empty bucket appears as 0 instead of vanishing.
     // The series reuses the window's own bind parameters; a missing bucket's
     // measures coalesce to 0 — the point of the feature.
+    //
+    // The series scaffold is Postgres-specific, so on any other dialect the
+    // feature is refused loudly rather than compiled into SQL that fails at
+    // runtime — the same trade as FanOut: a missing capability beats a wrong
+    // or broken answer.
+    if fill.is_some() && dialect != Dialect::Postgres {
+        return Err(CompileError::BadFillGaps(format!(
+            "not yet supported on the {dialect:?} dialect — its generate_series scaffold is \
+             postgres-specific"
+        )));
+    }
     if let Some(fill) = &fill {
         let step = fill.granularity.series_step();
         let trunc = fill.granularity.as_pg();
@@ -949,10 +1075,11 @@ fn compile_filter(
     has_joins: bool,
     f: &Filter,
     params: &mut Vec<ScalarValue>,
+    dialect: Dialect,
 ) -> Result<String, CompileError> {
     let (_, field) = split_member(&f.member)?;
     let (expr, dim_type) = dimension_expr(cube, field, has_joins)?;
-    compile_predicate(&expr, dim_type, f, params)
+    compile_predicate(&expr, dim_type, f, params, dialect)
 }
 
 /// Compile one filter operator against an already-resolved SQL expression —
@@ -962,6 +1089,7 @@ fn compile_predicate(
     dim_type: DimensionType,
     f: &Filter,
     params: &mut Vec<ScalarValue>,
+    dialect: Dialect,
 ) -> Result<String, CompileError> {
     let one = |params: &mut Vec<ScalarValue>| -> Result<usize, CompileError> {
         let v = f
@@ -972,7 +1100,7 @@ fn compile_predicate(
         params.push(v);
         Ok(params.len())
     };
-    let ph = |idx| placeholder(idx, dim_type);
+    let ph = |idx| placeholder(idx, dim_type, dialect);
 
     Ok(match f.operator {
         FilterOperator::Equals => format!("{} = {}", expr, ph(one(params)?)),
@@ -990,8 +1118,13 @@ fn compile_predicate(
                 None => return Err(CompileError::NeedsOneValue(f.member.clone())),
             };
             params.push(ScalarValue::String(format!("%{v}%")));
-            // ilike needs text; cast the column so it works on non-text columns.
-            format!("{}::text ilike ${}", expr, params.len())
+            // ilike needs text; cast the column so it works on non-text
+            // columns. Both dialects spell the operator `ilike`.
+            format!(
+                "{} ilike {}",
+                as_text(expr, dialect),
+                placeholder(params.len(), DimensionType::String, dialect)
+            )
         }
         FilterOperator::In | FilterOperator::NotIn => {
             if f.values.is_empty() {
