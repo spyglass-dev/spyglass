@@ -5,11 +5,13 @@
 //! is the default feature; future engines (DuckDB, BigQuery, …) plug in here
 //! behind their own flags without changing the model, query, or UI.
 
-use crate::compiler::{CompileError, Compiled};
+use crate::compiler::{CompileError, Compiled, Dialect};
 use crate::context::SecurityContext;
 use crate::model::Model;
 use crate::query::Query;
 
+#[cfg(feature = "clickhouse")]
+pub mod clickhouse;
 #[cfg(feature = "postgres")]
 pub mod postgres;
 
@@ -20,6 +22,15 @@ pub enum EngineError {
     #[cfg(feature = "postgres")]
     #[error("postgres error: {0}")]
     Postgres(#[from] tokio_postgres::Error),
+    #[cfg(feature = "clickhouse")]
+    #[error("clickhouse transport error: {0}")]
+    ClickHouseTransport(#[from] reqwest::Error),
+    /// A non-success HTTP status from ClickHouse, with the server's own
+    /// message — which names the real problem (bad SQL, unknown table, a type
+    /// mismatch) far better than a status code.
+    #[cfg(feature = "clickhouse")]
+    #[error("clickhouse error: {0}")]
+    ClickHouse(String),
 }
 
 /// A short-TTL in-process result cache. The key is built by the caller from
@@ -96,8 +107,15 @@ mod cache_tests {
 
 /// Shared, synchronous compile step. Execution is engine-specific (async).
 pub trait Engine {
-    /// Engine identifier (`postgres`, …) — surfaced in diagnostics.
+    /// Engine identifier (`postgres`, `clickhouse`, …) — surfaced in
+    /// diagnostics.
     fn name(&self) -> &'static str;
+
+    /// The SQL dialect this engine executes. Drives the shared compiler's
+    /// placeholder and coercion syntax; everything semantic stays shared.
+    fn dialect(&self) -> Dialect {
+        Dialect::Postgres
+    }
 
     /// Compile a query against the model + scope into a statement. Engines
     /// inject the real clock here — relative date ranges resolve against it,
@@ -108,6 +126,6 @@ pub trait Engine {
         query: &Query,
         ctx: &SecurityContext,
     ) -> Result<Compiled, CompileError> {
-        crate::compiler::compile_at(model, query, ctx, chrono::Utc::now())
+        crate::compiler::compile_at_for(model, query, ctx, chrono::Utc::now(), self.dialect())
     }
 }

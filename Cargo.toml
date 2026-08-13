@@ -13,6 +13,9 @@ license = "Apache-2.0"
 [features]
 default = ["postgres", "server", "tls"]
 postgres = ["dep:tokio-postgres", "dep:tokio"]
+# ClickHouse over the HTTP interface. Off by default: embedders opt in, and
+# the default build stays free of an HTTP client it does not use.
+clickhouse = ["dep:reqwest", "dep:tokio"]
 server = ["dep:actix-web", "dep:tokio", "dep:env_logger", "dep:log", "dep:time", "dep:dotenvy"]
 tls = ["dep:rustls", "dep:tokio-postgres-rustls", "dep:webpki-roots"]
 # Embed the built Studio React app (studio/dist) into the binary and serve it
@@ -30,6 +33,9 @@ thiserror = "2.0"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 chrono-tz = "0.10"
 tokio-postgres = { version = "0.7", optional = true }
+# ClickHouse's HTTP interface needs only an HTTP client. rustls, matching the
+# crate's TLS posture; no default features, so no native-tls creeps in.
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["rustls-tls", "json"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
 actix-web = { version = "4.9", optional = true }
 env_logger = { version = "0.11", optional = true }
@@ -57,3 +63,6 @@ required-features = ["server", "postgres"]
 [dev-dependencies]
 # For the DB-gated Pagila integration test (tests/pagila_integration.rs).
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# For the DB-gated ClickHouse integration test's fixture setup (DDL + inserts
+# go straight over HTTP; the engine under test only ever SELECTs).
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
