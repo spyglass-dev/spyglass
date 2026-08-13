@@ -5,6 +5,7 @@
  * pure `draftToWidgetSpec` turns the result into a renderable `WidgetSpec`.
  */
 import type { WidgetSpec, MetricSpec, PivotSpec, TableColumn, ValueFormat, ChartMark } from './types'
+import type { AntiExample, ModelVocabulary, QueryExample } from './reports/references'
 
 // ── Catalog (mirrors the engine's /meta) ────────────────────────────────────
 
@@ -42,9 +43,18 @@ export interface CubeMeta {
   joins?: { target: string; relationship: string }[]
   drill_members?: string[]
   segments?: { name: string; member: string; description?: string }[]
+  /** Worked examples of THIS cube's use — see `reports/references`. */
+  examples?: QueryExample[]
+  /** Plausible-but-wrong member choices on this cube, with the right one. */
+  anti_examples?: AntiExample[]
 }
 export interface CubeModelMeta {
   cubes: CubeMeta[]
+  /** Examples that span cubes belong to the model, not to either cube. */
+  examples?: QueryExample[]
+  anti_examples?: AntiExample[]
+  /** What users call things versus what the model calls them. */
+  vocabulary?: ModelVocabulary
 }
 
 // ── The query + widget draft ─────────────────────────────────────────────────

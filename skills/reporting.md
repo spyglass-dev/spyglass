@@ -51,6 +51,36 @@ and the engine compiles + scopes the SQL. The host pins the tenant scope
 4. **Save** the report doc in the product. Acknowledge with a one-line `final`;
    never dump the data as text in chat.
 
+## Tool order: recognise → verify → build
+
+When the host registers the report tools (`@spyglass/ui`'s `buildReportTools`),
+the order they are used in is part of the contract, not a preference:
+
+1. **`find_reference_queries`** — FIRST, before composing anything. The model
+   carries verified examples of its own use, with what each one *means* and how
+   it wants to be rendered. Starting from the closest example is faster and more
+   accurate than composing from the member list. Read the `anti` entries it
+   returns: those are plausible-but-wrong member choices — the mistake
+   validation cannot catch, because both members are real.
+2. **`explore_data`** — verify. An example is a starting point, not proof that
+   today's data supports it. Look at the rows before you build a widget on them.
+3. **`create_report`** / **`add_report_widget`** — build.
+
+### Editing what is already on screen
+
+If the user refers to the report in front of them — *"add a filter"*, *"make
+that a bar chart"*, *"drop the last widget"*, *"reorder it"*, *"rename it"* —
+call **`get_report`** first and then the one tool that does the job
+(`edit_report_widget`, `remove_report_widget`, `move_report_widget`,
+`set_report_filters`, `rename_report`). Rebuilding the whole report with
+`create_report` throws away everything else the user had.
+
+**Filters are declared, not baked in.** `set_report_filters` (and
+`create_report`'s `facets`) declare what the filter bar OFFERS; the framework
+applies the chosen values to every widget whose cube has that dimension. Writing
+the filter into each widget query instead produces a report that cannot be
+re-pointed and a filter bar that does nothing.
+
 ## Rules
 
 - Pick measures/dimensions from the model; never raw SQL.

@@ -17,6 +17,11 @@ export * from './views'
 export * from './report'
 export * from './report.schema'
 export * from './distri'
+export * from './reports/store'
+export * from './reports/serverStore'
+export * from './reports/edit-tools'
+export * from './reports/references'
+export * from './reports/useReportModel'
 export { Widget } from './components/Widget'
 export { AllTimeChip } from './components/AllTimeChip'
 export { ReportView } from './components/ReportView'
@@ -54,3 +59,8 @@ export { ReportCanvas, type ReportCanvasProps } from './components/ReportCanvas'
 export { WidgetError, humanizeWidgetError, type WidgetErrorData } from './components/WidgetError'
 export { ReportLoading } from './components/ReportLoading'
 export { ReportEmptyState, type ReportEmptyStateProps } from './components/ReportEmptyState'
+export {
+  WidgetPromptDialog,
+  type WidgetPromptDialogProps,
+  type WidgetPromptState,
+} from './components/WidgetPromptDialog'
