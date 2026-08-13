@@ -14,6 +14,8 @@ import { Widget } from './Widget'
 import { DataGrid, type GridQueryDelta } from './DataGrid'
 import { routeDrill, type DrillEvent, type DrillRouter } from '../drill'
 import type { ViewRegistry } from '../views'
+import { outcomesFrom } from '../reports/outcome'
+import type { WidgetOutcome } from '../reports/session'
 import { applyGridDelta, draftToWidgetSpec } from '../querybuilder'
 import { parseReportSearch, reportStateToSearch, type GridUrlState } from '../urlstate'
 import { FilterBar } from './FilterBar'
@@ -39,6 +41,12 @@ function span(w?: number): CSSProperties {
 export interface ReportCanvasProps {
   report: Report
   onChange: (report: Report) => void
+  /**
+   * What each widget rendered, keyed by widget id, after every resolve. The
+   * host keeps it so its agent can read it through `get_report` — without this
+   * a widget showing "No data" is indistinguishable from one showing 107 rows.
+   */
+  onResolved?: (outcomes: Map<string, WidgetOutcome>) => void
   runQuery: QueryRunner
   cubeCaps?: CubeCapsMap
   /** Host widget renderers (merged with the built-in `widget_error`). */
@@ -85,6 +93,7 @@ function InsertBar({ onClick }: { onClick?: () => void }) {
 export function ReportCanvas({
   report,
   onChange,
+  onResolved,
   runQuery,
   cubeCaps,
   registry,
@@ -161,7 +170,14 @@ export function ReportCanvas({
     setLoading(true)
     setError(null)
     resolveReport(report, { runQuery, cubeCaps, views, filters, humanizeError })
-      .then((r) => !cancelled && setResolved(r))
+      .then((r) => {
+        if (cancelled) return
+        setResolved(r)
+        // Keep what we just learned, rather than drawing it and forgetting.
+        onResolved?.(
+          outcomesFrom({ source: report.widgets, resolved: r.widgets, filters, cubeCaps }),
+        )
+      })
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)))
       .finally(() => !cancelled && setLoading(false))
     return () => {

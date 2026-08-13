@@ -11,25 +11,37 @@
  * on any agent runtime; the host casts at the call site.
  */
 import type { AgentTool, ReportHost, ToolContext } from '../distri'
-import { isReportWidget, validateWidgetQueries, withProvenance } from '../distri'
+import { isReportWidget, stateOf, validateWidgetQueries, withProvenance } from '../distri'
 import { FILTER_SPEC_SCHEMA, validateFilterSpec } from '../report.schema'
+import { checkFacetKeys, warnBakedDateRange } from './guards'
+import { resolveWidget, widgetId, withWidgetIds } from './session'
 import type { FacetSpec, Report, ReportWidget } from '../report'
 
 const ok = (data: unknown) => [{ part_type: 'data' as const, data }]
 
-/** A compact view of one widget — enough to decide what to change, without
- *  returning every query into the context window. */
-function describeWidget(w: ReportWidget, index: number) {
-  const anyW = w as unknown as Record<string, unknown>
-  const q = anyW.query as { measures?: string[]; dimensions?: string[] } | undefined
-  return {
-    index,
-    type: anyW.type,
-    as: anyW.as,
-    title: anyW.title ?? anyW.label,
-    measures: q?.measures,
-    dimensions: q?.dimensions,
-  }
+/** Widget reference: `id` (stable) or `index` (positional). Both accepted. */
+const WIDGET_REF = {
+  id: { type: 'string', description: 'The widget id from get_report. PREFERRED — survives reorder.' },
+  index: { type: 'number', description: '0-based position. Use only if you have no id.' },
+}
+
+/**
+ * Read the report, with ids assigned, so every tool below addresses the same
+ * widgets `get_report` reported. Returns null when nothing is open.
+ */
+function openReport(host: ReportHost): { report: Report; widgets: ReportWidget[] } | null {
+  const report = host.getReport()
+  if (!report) return null
+  return { report, widgets: withWidgetIds(report.widgets) }
+}
+
+/** The one message every tool gives when there is nothing to act on. */
+const NOTHING_OPEN = {
+  ok: false,
+  error:
+    'No report is open, so there is nothing to change. If they asked for a NEW report, use ' +
+    'create_report; otherwise open one first.',
+  state: { status: 'none' as const },
 }
 
 /** `get_report` — look at what is on screen before changing it. */
@@ -40,18 +52,25 @@ export function getReportTool(host: ReportHost): AgentTool {
     autoExecute: true,
     name: 'get_report',
     description:
-      'Read the report currently open: its title, its declared filters (facets), and a compact list of its widgets with their measures and dimensions. CALL THIS FIRST, BEFORE ANY OTHER REPORT TOOL, whenever the user refers to what is on screen — "this report", "add a filter", "remove that widget", "reorder", "rename it". It is cheap and it returns the widget indexes the edit tools take. Editing the open report is almost always what is wanted; do not plan a new one unless a NEW report was asked for.',
+      'Read the report session: whether a report is open (`status`: none | draft | saved), its title, its declared filters, and every widget with its id AND WHAT IT RETURNED LAST TIME IT RAN (`outcome.status`: ok | empty | error | unresolved, with row counts). ' +
+      'CALL THIS FIRST whenever the user refers to what is on screen — "this report", "add a filter", "remove that widget", "reorder", "rename it" — and whenever you want to know whether what you just built actually works. ' +
+      'If `status` is draft or saved, a report IS open: change it with the edit tools. Do NOT call create_report, which replaces it. ' +
+      'A widget whose outcome is `empty` renders "No data" to the user: that is a bug to fix, not a result to report. It is cheap, runs no queries, and returns the ids the edit tools take.',
     parameters: { type: 'object', additionalProperties: false, properties: {} },
     handler: async () => {
-      const report = host.getReport()
-      if (!report) return ok({ ok: false, error: 'No report is open.' })
+      const state = stateOf(host)
+      if (state.status === 'none') {
+        return ok({ ok: true, state, note: 'No report is open. Only create_report is available.' })
+      }
+      const empty = state.widgets.filter((w) => w.outcome.status === 'empty').map((w) => w.title || w.id)
+      const failed = state.widgets.filter((w) => w.outcome.status === 'error').map((w) => w.title || w.id)
       return ok({
         ok: true,
-        title: report.title,
-        description: report.description,
-        facets: report.facets ?? [],
-        widget_count: report.widgets.length,
-        widgets: report.widgets.map(describeWidget),
+        state,
+        ...(empty.length
+          ? { attention: `These widgets returned NO ROWS and render "No data": ${empty.join(', ')}. Fix them before telling the user the report is done.` }
+          : {}),
+        ...(failed.length ? { errors: `These widgets failed: ${failed.join(', ')}.` } : {}),
       })
     },
   }
@@ -65,32 +84,34 @@ export function editWidgetTool(host: ReportHost, ctx: ToolContext = {}): AgentTo
     autoExecute: true,
     name: 'edit_report_widget',
     description:
-      'REPLACE one widget, by its 0-based `index` (from get_report), with the FULL replacement widget with the change applied. Only that widget changes. To append use add_report_widget; to rebuild, create_report.',
+      'REPLACE one widget — identified by its `id` (preferred) or 0-based `index` from get_report — with the FULL replacement widget, change applied. Only that widget changes; everything else is untouched. Do NOT put a `dateRange` in the query: the report\'s date filter owns the window. Returns the report state, so check the widget actually returned rows.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        index: { type: 'number' },
+        ...WIDGET_REF,
         widget: { type: 'object' },
         prompt: { type: 'string', description: "The user's ask, verbatim (stored as provenance)." },
       },
-      required: ['index', 'widget'],
+      required: ['widget'],
     },
     handler: async (input) => {
-      const a = (input ?? {}) as { index?: number; widget?: unknown; prompt?: string }
-      const report = host.getReport()
-      if (!report) return ok({ ok: false, error: 'No report is open.' })
+      const a = (input ?? {}) as { id?: string; index?: number; widget?: unknown; prompt?: string }
+      const open = openReport(host)
+      if (!open) return ok(NOTHING_OPEN)
       if (!isReportWidget(a.widget)) return ok({ ok: false, error: 'Provide a valid `widget`.' })
-      const i = a.index
-      if (typeof i !== 'number' || i < 0 || i >= report.widgets.length) {
-        return ok({ ok: false, error: `index out of range (report has ${report.widgets.length}).` })
-      }
+      const found = resolveWidget(open.widgets, a)
+      if ('error' in found) return ok({ ok: false, error: found.error, state: stateOf(host) })
       const invalid = validateWidgetQueries([a.widget], ctx.meta)
       if (invalid) return ok(invalid)
+      const warning = warnBakedDateRange([a.widget])
+      const keepId = widgetId(open.widgets[found.index])
       const [replacement] = withProvenance([a.widget], a.prompt)
-      const widgets = report.widgets.map((w, idx) => (idx === i ? replacement : w))
-      host.setReport({ ...report, widgets })
-      return ok({ ok: true, widget_count: widgets.length })
+      const widgets = open.widgets.map((w, idx) =>
+        idx === found.index ? ({ ...replacement, id: keepId } as ReportWidget) : w,
+      )
+      host.setReport({ ...open.report, widgets })
+      return ok({ ok: true, id: keepId, ...(warning ? { warning } : {}), state: stateOf(host) })
     },
   }
 }
@@ -102,23 +123,20 @@ export function removeWidgetTool(host: ReportHost): AgentTool {
     isExternal: true,
     autoExecute: true,
     name: 'remove_report_widget',
-    description: 'Delete ONE widget by its 0-based `index` (see get_report).',
+    description: 'Delete ONE widget, by its `id` (preferred) or 0-based `index` from get_report.',
     parameters: {
       type: 'object',
       additionalProperties: false,
-      properties: { index: { type: 'number' } },
-      required: ['index'],
+      properties: { ...WIDGET_REF },
     },
     handler: async (input) => {
-      const report = host.getReport()
-      if (!report) return ok({ ok: false, error: 'No report is open.' })
-      const i = (input as { index?: number })?.index
-      if (typeof i !== 'number' || i < 0 || i >= report.widgets.length) {
-        return ok({ ok: false, error: `index out of range (report has ${report.widgets.length}).` })
-      }
-      const widgets = report.widgets.filter((_, idx) => idx !== i)
-      host.setReport({ ...report, widgets })
-      return ok({ ok: true, widget_count: widgets.length })
+      const open = openReport(host)
+      if (!open) return ok(NOTHING_OPEN)
+      const found = resolveWidget(open.widgets, (input ?? {}) as { id?: string; index?: number })
+      if ('error' in found) return ok({ ok: false, error: found.error, state: stateOf(host) })
+      const widgets = open.widgets.filter((_, idx) => idx !== found.index)
+      host.setReport({ ...open.report, widgets })
+      return ok({ ok: true, state: stateOf(host) })
     },
   }
 }
@@ -131,27 +149,30 @@ export function moveWidgetTool(host: ReportHost): AgentTool {
     autoExecute: true,
     name: 'move_report_widget',
     description:
-      'Reorder: move the widget at `from` to position `to` (0-based). A report reads top to bottom — headline metrics, then the breakdown that explains them, then the detail.',
+      'Reorder: move one widget — by `id` (preferred) or `from` index — to position `to` (0-based). A report reads top to bottom: headline metrics, then the breakdown that explains them, then the detail.',
     parameters: {
       type: 'object',
       additionalProperties: false,
-      properties: { from: { type: 'number' }, to: { type: 'number' } },
-      required: ['from', 'to'],
+      properties: {
+        id: { type: 'string', description: 'The widget to move (from get_report). PREFERRED.' },
+        from: { type: 'number', description: 'Its current position, if you have no id.' },
+        to: { type: 'number', description: 'Where it should end up.' },
+      },
+      required: ['to'],
     },
     handler: async (input) => {
-      const report = host.getReport()
-      if (!report) return ok({ ok: false, error: 'No report is open.' })
-      const { from, to } = (input ?? {}) as { from?: number; to?: number }
-      const n = report.widgets.length
-      if (typeof from !== 'number' || from < 0 || from >= n) {
-        return ok({ ok: false, error: `from out of range (report has ${n}).` })
-      }
-      const dest = Math.max(0, Math.min(typeof to === 'number' ? to : n - 1, n - 1))
-      const widgets = [...report.widgets]
-      const [moved] = widgets.splice(from, 1)
+      const open = openReport(host)
+      if (!open) return ok(NOTHING_OPEN)
+      const a = (input ?? {}) as { id?: string; from?: number; to?: number }
+      const found = resolveWidget(open.widgets, { id: a.id, index: a.from })
+      if ('error' in found) return ok({ ok: false, error: found.error, state: stateOf(host) })
+      const n = open.widgets.length
+      const dest = Math.max(0, Math.min(typeof a.to === 'number' ? a.to : n - 1, n - 1))
+      const widgets = [...open.widgets]
+      const [moved] = widgets.splice(found.index, 1)
       widgets.splice(dest, 0, moved)
-      host.setReport({ ...report, widgets })
-      return ok({ ok: true, from, to: dest })
+      host.setReport({ ...open.report, widgets })
+      return ok({ ok: true, from: found.index, to: dest, state: stateOf(host) })
     },
   }
 }
@@ -165,14 +186,14 @@ export function moveWidgetTool(host: ReportHost): AgentTool {
  * re-pointed and a filter bar that does nothing — `applyFilters` skips a facet
  * when the query already filters that member.
  */
-export function setReportFiltersTool(host: ReportHost): AgentTool {
+export function setReportFiltersTool(host: ReportHost, ctx: ToolContext = {}): AgentTool {
   return {
     type: 'function',
     isExternal: true,
     autoExecute: true,
     name: 'set_report_filters',
     description:
-      'Declare the filter bar for the OPEN report — which filters it offers and which are mandatory. Use for "add a filter for X", "make it filterable by X", "scope this to X". A facet is a DECLARATION: { key, label, required?, single?, source?, options? }, where `key` is the dimension the cubes filter on. Prefer this over baking a filter into widget queries. Replaces the whole spec, so include every facet you want kept.',
+      'Declare the filter bar for the OPEN report — which filters it offers and which are mandatory. Use for "add a filter for X", "make it filterable by X", "scope this to X". A facet is a DECLARATION: { key, label, required?, single?, source?, options? }, where `key` is a dimension the reader picks a VALUE of — class_id, status, student_id. NEVER a time dimension: every report already has a date range, and a facet over a date can only be an empty menu. Prefer this over baking a filter into widget queries. Replaces the whole spec, so include every facet you want kept.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -181,15 +202,17 @@ export function setReportFiltersTool(host: ReportHost): AgentTool {
     },
     handler: async (input) => {
       const report = host.getReport()
-      if (!report) return ok({ ok: false, error: 'No report is open.' })
+      if (!report) return ok(NOTHING_OPEN)
       const facets = (input as { facets?: unknown })?.facets
       const v = validateFilterSpec(facets)
       if (!v.valid) {
         const detail = v.errors.map((e) => `${e.path} ${e.message}`).join('; ')
         return ok({ ok: false, error: `Invalid facets: ${detail}` })
       }
+      const badKey = checkFacetKeys(facets as FacetSpec[], ctx.meta)
+      if (badKey) return ok({ ok: false, error: badKey })
       host.setReport({ ...report, facets: facets as FacetSpec[] })
-      return ok({ ok: true, facets: (facets as FacetSpec[]).map((f) => f.key) })
+      return ok({ ok: true, facets: (facets as FacetSpec[]).map((f) => f.key), state: stateOf(host) })
     },
   }
 }
@@ -211,13 +234,13 @@ export function renameReportTool(host: ReportHost): AgentTool {
     },
     handler: async (input) => {
       const report = host.getReport()
-      if (!report) return ok({ ok: false, error: 'No report is open.' })
+      if (!report) return ok(NOTHING_OPEN)
       const { title, description } = (input ?? {}) as { title?: string; description?: string }
       const next: Report = { ...report }
       if (title?.trim()) next.title = title.trim()
       if (description !== undefined) next.description = description
       host.setReport(next)
-      return ok({ ok: true, title: next.title })
+      return ok({ ok: true, title: next.title, state: stateOf(host) })
     },
   }
 }
@@ -229,7 +252,7 @@ export function buildEditTools(host: ReportHost, ctx: ToolContext = {}): AgentTo
     editWidgetTool(host, ctx),
     removeWidgetTool(host),
     moveWidgetTool(host),
-    setReportFiltersTool(host),
+    setReportFiltersTool(host, ctx),
     renameReportTool(host),
   ]
 }

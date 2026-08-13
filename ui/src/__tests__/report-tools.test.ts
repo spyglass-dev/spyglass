@@ -79,31 +79,66 @@ describe('buildReportTools — what a host gets', () => {
   })
 })
 
-describe('get_report — look before you edit', () => {
-  it('returns widget indexes, declared facets and a compact widget list', async () => {
+describe('get_report — the session state', () => {
+  it('returns the state: status, facets, and every widget with an id', async () => {
     const { host } = makeHost({
       title: 'Class health',
       facets: [{ key: 'class_id', label: 'Class' }],
       widgets: [widget('Submissions'), { type: 'note', markdown: 'hi' }],
     } as unknown as Report)
     const out = await call(byName(buildReportTools(host), 'get_report'), {})
+    const state = out.state as Record<string, unknown>
     expect(out.ok).toBe(true)
-    expect(out.title).toBe('Class health')
-    expect(out.widget_count).toBe(2)
-    expect(out.facets).toEqual([{ key: 'class_id', label: 'Class' }])
-    expect((out.widgets as Array<Record<string, unknown>>)[0]).toMatchObject({
-      index: 0,
-      type: 'bound',
-      measures: ['A.count'],
-    })
+    expect(state.status).toBe('draft')
+    expect(state.title).toBe('Class health')
+    expect(state.widget_count).toBe(2)
+    expect(state.facets).toEqual([{ key: 'class_id', label: 'Class' }])
+    const w = (state.widgets as Array<Record<string, unknown>>)[0]
+    expect(w).toMatchObject({ index: 0, type: 'bound', measures: ['A.count'] })
+    expect(w.id).toEqual(expect.stringMatching(/^w_/))
   })
 
-  it('says so when nothing is open, instead of inventing a report', async () => {
+  it('reports status "saved" once the host has an id for it', async () => {
+    const { host } = makeHost(report([widget('a')]))
+    host.getSavedId = () => 'rpt-9'
+    const out = await call(byName(buildReportTools(host), 'get_report'), {})
+    expect(out.state).toMatchObject({ status: 'saved', id: 'rpt-9' })
+  })
+
+  it('says nothing is open as a STATE, not a failure — none is where create_report belongs', async () => {
     const { host } = makeHost(null)
-    expect(await call(byName(buildReportTools(host), 'get_report'), {})).toEqual({
-      ok: false,
-      error: 'No report is open.',
+    const out = await call(byName(buildReportTools(host), 'get_report'), {})
+    expect(out.ok).toBe(true)
+    expect(out.state).toMatchObject({ status: 'none', widget_count: 0 })
+    expect(String(out.note)).toMatch(/create_report/)
+  })
+
+  it('carries each widget\'s outcome, so an empty widget is visible', async () => {
+    const { host, state } = makeHost(report([widget('Scores'), widget('Submissions')]))
+    // The canvas resolved these; the host keeps what it learned.
+    const ids = () => (host.getReport()!.widgets as Array<{ id?: string }>).map((w) => w.id!)
+    await call(byName(buildReportTools(host), 'get_report'), {}) // assigns ids
+    const [a, b] = ids()
+    host.getOutcomes = () => ({
+      [a]: { status: 'empty', row_count: 0, applied: { facets: ['class_id'], dateField: 'created_at' } },
+      [b]: { status: 'ok', row_count: 107 },
     })
+    const out = await call(byName(buildReportTools(host), 'get_report'), {})
+    const widgets = (out.state as { widgets: Array<Record<string, unknown>> }).widgets
+    expect(widgets[0].outcome).toMatchObject({ status: 'empty', row_count: 0 })
+    expect(widgets[1].outcome).toMatchObject({ status: 'ok', row_count: 107 })
+    // Not merely present in the payload — called out, because the agent that
+    // built this one reported success while every panel said "No data".
+    expect(String(out.attention)).toMatch(/No data|NO ROWS/i)
+    expect(state.report).toBeTruthy()
+  })
+
+  it('defaults every outcome to unresolved when the host reports none', async () => {
+    const { host } = makeHost(report([widget('a')]))
+    const out = await call(byName(buildReportTools(host), 'get_report'), {})
+    const widgets = (out.state as { widgets: Array<Record<string, unknown>> }).widgets
+    expect(widgets[0].outcome).toEqual({ status: 'unresolved' })
+    expect(out.attention).toBeUndefined()
   })
 })
 
@@ -216,7 +251,8 @@ describe('edit_report_widget', () => {
       index: 1,
       widget: widget('B!'),
     })
-    expect(out).toMatchObject({ ok: true, widget_count: 3 })
+    expect(out.ok).toBe(true)
+    expect(out.state).toMatchObject({ widget_count: 3 })
     expect(state.report!.widgets.map((w) => (w as { title?: string }).title)).toEqual(['a', 'B!', 'c'])
   })
 
@@ -244,7 +280,8 @@ describe('remove_report_widget and move_report_widget', () => {
   it('removes by index', async () => {
     const { host, state } = makeHost(report([widget('a'), widget('b')]))
     const out = await call(byName(buildReportTools(host), 'remove_report_widget'), { index: 0 })
-    expect(out).toMatchObject({ ok: true, widget_count: 1 })
+    expect(out.ok).toBe(true)
+    expect(out.state).toMatchObject({ widget_count: 1 })
     expect((state.report!.widgets[0] as { title?: string }).title).toBe('b')
   })
 
@@ -252,6 +289,7 @@ describe('remove_report_widget and move_report_widget', () => {
     const { host, state } = makeHost(report([widget('a'), widget('b'), widget('c')]))
     const out = await call(byName(buildReportTools(host), 'move_report_widget'), { from: 2, to: 0 })
     expect(out).toMatchObject({ ok: true, from: 2, to: 0 })
+    expect(out.state).toBeTruthy()
     expect(state.report!.widgets.map((w) => (w as { title?: string }).title)).toEqual(['c', 'a', 'b'])
   })
 
@@ -265,7 +303,7 @@ describe('remove_report_widget and move_report_widget', () => {
 describe('set_report_filters — declared, not baked in', () => {
   it('replaces the whole spec and leaves widget queries untouched', async () => {
     const { host, state } = makeHost(report([widget('a')]))
-    const before = state.report!.widgets[0]
+    const beforeQuery = JSON.stringify((state.report!.widgets[0] as { query: unknown }).query)
     const out = await call(byName(buildReportTools(host), 'set_report_filters'), {
       facets: [
         { key: 'workspace_id', label: 'Workspace', required: true, single: true },
@@ -274,7 +312,9 @@ describe('set_report_filters — declared, not baked in', () => {
     })
     expect(out).toMatchObject({ ok: true, facets: ['workspace_id', 'class_id'] })
     expect(state.report!.facets).toHaveLength(2)
-    expect(state.report!.widgets[0]).toBe(before)
+    // The QUERY is untouched. (The widget itself gains an id on first read —
+    // that is the repair, and it is why facets are declared, not baked in.)
+    expect(JSON.stringify((state.report!.widgets[0] as { query: unknown }).query)).toBe(beforeQuery)
   })
 
   it('rejects an invalid spec rather than writing a filter bar that cannot render', async () => {
@@ -315,10 +355,12 @@ describe('every editing tool refuses to work on nothing', () => {
     rename_report: { title: 'x' },
   }
   for (const [name, input] of Object.entries(inputs)) {
-    it(`${name} reports "no report is open"`, async () => {
+    it(`${name} refuses, and points at create_report`, async () => {
       const { host } = makeHost(null)
       const out = await call(byName(buildReportTools(host), name), input)
-      expect(out).toEqual({ ok: false, error: 'No report is open.' })
+      expect(out.ok).toBe(false)
+      expect(String(out.error)).toMatch(/No report is open/)
+      expect(String(out.error)).toMatch(/create_report/)
     })
   }
 })
