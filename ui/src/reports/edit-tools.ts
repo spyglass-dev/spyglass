@@ -58,7 +58,8 @@ export function getReportTool(host: ReportHost): AgentTool {
       'A widget whose outcome is `empty` renders "No data" to the user: that is a bug to fix, not a result to report. It is cheap, runs no queries, and returns the ids the edit tools take.',
     parameters: { type: 'object', additionalProperties: false, properties: {} },
     handler: async () => {
-      const state = stateOf(host)
+      // `get_report` IS the look: full detail, samples included.
+      const state = stateOf(host, 'full')
       if (state.status === 'none') {
         return ok({ ok: true, state, note: 'No report is open. Only create_report is available.' })
       }

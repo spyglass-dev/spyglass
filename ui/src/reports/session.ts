@@ -183,6 +183,31 @@ export interface SessionInput {
   outcomes?: Map<string, WidgetOutcome> | Record<string, WidgetOutcome>
 }
 
+/**
+ * A COMPACT state, for the result of a tool that changed something.
+ *
+ * A mutation's job is to say what the report is NOW — status, size, and which
+ * widgets are in trouble. Row samples and member lists belong to `get_report`,
+ * which is called when the agent actually wants to look. Sending everything on
+ * every edit pads each turn with detail nobody asked for.
+ */
+export function compactState(state: ReportSessionState): ReportSessionState {
+  return {
+    ...state,
+    widgets: state.widgets.map((w) => ({
+      id: w.id,
+      index: w.index,
+      type: w.type,
+      title: w.title,
+      outcome: {
+        status: w.outcome.status,
+        ...(w.outcome.row_count !== undefined ? { row_count: w.outcome.row_count } : {}),
+        ...(w.outcome.error ? { error: w.outcome.error } : {}),
+      },
+    })),
+  }
+}
+
 /** Build the state an agent reads. Pure: no queries, no fetches, no mutation. */
 export function sessionState({ report, savedId, outcomes }: SessionInput): ReportSessionState {
   if (!report) return NO_REPORT

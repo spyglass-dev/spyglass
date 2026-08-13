@@ -16,6 +16,7 @@ import { checkFacetKeys, warnBakedDateRange } from './reports/guards'
 import {
   findDuplicate,
   newWidgetId,
+  compactState,
   sessionState,
   withWidgetIds,
   widgetId,
@@ -468,7 +469,7 @@ export function addViewTool(host: ReportHost, ctx: ToolContext): AgentTool {
  * find out what happened — that round trip is where "add a widget" turned into
  * "add it twice".
  */
-export function stateOf(host: ReportHost): ReportSessionState {
+export function stateOf(host: ReportHost, detail: 'full' | 'compact' = 'compact'): ReportSessionState {
   const report = host.getReport()
   if (report) {
     // Repair-on-read: a report authored before widget ids existed gets them
@@ -479,11 +480,12 @@ export function stateOf(host: ReportHost): ReportSessionState {
     const widgets = withWidgetIds(report.widgets)
     if (widgets !== report.widgets) host.setReport({ ...report, widgets })
   }
-  return sessionState({
+  const state = sessionState({
     report: host.getReport(),
     savedId: host.getSavedId?.() ?? null,
     outcomes: host.getOutcomes?.(),
   })
+  return detail === 'full' ? state : compactState(state)
 }
 
 /** Cubes the open report already queries — context for example ranking. */
