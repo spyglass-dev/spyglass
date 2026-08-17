@@ -10,7 +10,7 @@
  */
 import { lazy, Suspense, useMemo } from 'react'
 import type { VegaEmbedProps } from 'react-vega'
-import { type ChartSpec, type ValueFormat } from '../types'
+import { parseTimestamp, type ChartSpec, type ValueFormat } from '../types'
 import { tokens } from '../tokens'
 
 // Lazy-load react-vega (and Vega) so the heavy renderer is only fetched when a
@@ -97,15 +97,44 @@ function xType(
   mark: string,
 ): 'nominal' | 'quantitative' | 'temporal' {
   if (!x) return 'nominal'
+  const vals = series.map((r) => r[x])
+  // Dates are temporal WHATEVER the mark. A monthly cohort chart is bars over
+  // time, and treating its x as nominal printed the raw bucket
+  // (`2026-04-01 00:00:00+00`, ellipsised to `2026-04-01 00:…`) as a category
+  // label. Time is time; only the mark drawn on it differs.
+  const allDate =
+    vals.length > 0 && vals.every((v) => typeof v === 'string' && isTimestamp(v))
+  if (allDate) return 'temporal'
   const trend = mark === 'line' || mark === 'area' || mark === 'point'
   if (!trend) return 'nominal'
-  const vals = series.map((r) => r[x])
   const allNum = vals.every(
     (v) => typeof v === 'number' || (typeof v === 'string' && v.trim() !== '' && !Number.isNaN(Number(v))),
   )
-  if (allNum) return 'quantitative'
-  const allDate = vals.every((v) => typeof v === 'string' && !Number.isNaN(Date.parse(v)))
-  return allDate ? 'temporal' : 'nominal'
+  return allNum ? 'quantitative' : 'nominal'
+}
+
+/** A date-shaped string — `Date.parse` alone says yes to "2" and to a category
+ *  called "May", which would turn an ordinary bar chart into a broken timeline. */
+function isTimestamp(v: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}([ T]|$)/.test(v) && !Number.isNaN(parseTimestamp(v))
+}
+
+const DAY = 86_400_000
+/** The bucket a time series is stepped in, read off the smallest gap between
+ *  two distinct points. Undefined for a single point (nothing to measure). */
+function inferTimeUnit(values: Record<string, unknown>[], field: string): string | undefined {
+  const ms = [...new Set(values.map((r) => parseTimestamp(String(r[field]))))]
+    .filter((n) => !Number.isNaN(n))
+    .sort((a, b) => a - b)
+  if (ms.length < 2) return undefined
+  let step = Infinity
+  for (let i = 1; i < ms.length; i++) step = Math.min(step, ms[i] - ms[i - 1])
+  if (step <= DAY / 2) return 'yearmonthdatehours'
+  if (step <= DAY * 1.5) return 'yearmonthdate'
+  if (step <= DAY * 10) return 'yearweek'
+  if (step <= DAY * 45) return 'yearmonth'
+  if (step <= DAY * 120) return 'yearquarter'
+  return 'year'
 }
 
 /** Escape dots in a field name so Vega-Lite treats it as a flat key, not a
@@ -138,6 +167,10 @@ function foldSeries(
 }
 
 /** Compile a compact `ChartSpec.chart` into a Vega-Lite spec. */
+export function toVegaLiteForTest(chart: ChartSpec['chart']): VlSpec {
+  return toVegaLite(chart)
+}
+
 function toVegaLite(chart: ChartSpec['chart']): VlSpec {
   const { mark, x, stack, format } = chart
   let { y, color } = chart as { y: string | string[]; color?: string }
@@ -159,11 +192,16 @@ function toVegaLite(chart: ChartSpec['chart']): VlSpec {
 
   const vmark = mark === 'progress' ? 'bar' : mark
   const xt = xType(values, hasX ? xField : undefined, mark)
+  // A bar needs a BAND to sit in. On a bare continuous time scale Vega draws
+  // 1px hairlines, so a bar over time carries the bucket as a timeUnit —
+  // inferred from the spacing of the data, since the widget does not say.
+  const timeUnit = vmark === 'bar' && xt === 'temporal' ? inferTimeUnit(values, xField) : undefined
   const encoding: Record<string, unknown> = {
     x: {
       field: esc(xField),
       type: xt,
       title: null,
+      ...(timeUnit ? { timeUnit } : {}),
       // Straight, ellipsis-truncated category labels — never rotated text
       // (the default -90° spin is the loudest "unstyled Vega" signal).
       ...(xt === 'nominal'

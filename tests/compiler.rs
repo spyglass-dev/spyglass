@@ -414,3 +414,57 @@ cubes:
     assert_eq!(orders.measures.len(), 2);
     assert!(orders.dimensions.get("workspace_id").expect("ws").tenant);
 }
+
+/// A time dimension asked for as a plain GROUP BY — "list workspaces with
+/// their created_at" — used to be projected raw. The Postgres row decoder
+/// handles bool/int/float/text and returns NULL for everything else, so a
+/// `timestamptz` arrived as null and the column rendered "—" over data that
+/// was fully populated. The compiler's own contract is "measures are float8,
+/// time is text"; this projection was the one place that broke it.
+#[test]
+fn a_grouped_time_dimension_is_projected_as_text() {
+    let model = submissions_model();
+    let query = Query {
+        measures: vec!["Submissions.count".into()],
+        dimensions: vec!["Submissions.created_at".into()],
+        ..Default::default()
+    };
+    let ctx = SecurityContext::default().allow_unscoped();
+    let c = spyglass::compile(&model, &query, &ctx).expect("compiles");
+    assert!(
+        c.sql
+            .contains("created_at::text as \"Submissions.created_at\""),
+        "raw timestamptz reaches the client as null: {}",
+        c.sql
+    );
+    // Grouped on the same expression, or Postgres rejects the projection.
+    assert!(
+        c.sql.contains("group by created_at::text"),
+        "group by must match the projection: {}",
+        c.sql
+    );
+}
+
+/// The column KIND drives formatting and drill on the client. A timestamp
+/// reported as an ordinary dimension rendered as a drill link whose target is
+/// "created_at equals this exact microsecond" — one row, every time.
+#[test]
+fn a_grouped_time_dimension_reports_kind_time() {
+    let model = submissions_model();
+    let query = Query {
+        measures: vec!["Submissions.count".into()],
+        dimensions: vec!["Submissions.created_at".into(), "Submissions.status".into()],
+        ..Default::default()
+    };
+    let ctx = SecurityContext::default().allow_unscoped();
+    let c = spyglass::compile(&model, &query, &ctx).expect("compiles");
+    let kind = |key: &str| {
+        c.columns
+            .iter()
+            .find(|col| col.key == key)
+            .map(|col| col.kind.as_str())
+            .unwrap_or("missing")
+    };
+    assert_eq!(kind("Submissions.created_at"), "time");
+    assert_eq!(kind("Submissions.status"), "dimension");
+}

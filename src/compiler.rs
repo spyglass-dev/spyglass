@@ -819,14 +819,31 @@ pub fn compile_at_for(
     for member in &query.dimensions {
         let (_, field) = split_member(member)?;
         let cube = plan.cube_for(member)?;
-        let (expr, _) = dimension_expr(cube, field, has_joins)?;
+        let (raw_expr, dim_type) = dimension_expr(cube, field, has_joins)?;
+        // A TIME dimension is rendered as text, exactly like a bucketed one.
+        // The engine's row decoder handles bool/int/float/text and returns
+        // NULL for anything else, so a raw `timestamptz` projected here came
+        // back as null and the column rendered "—" over perfectly good data.
+        // The contract was always "measures are float8, time is text"; this is
+        // the one projection path that broke it. ISO text also sorts
+        // chronologically, so `order` on the member is unaffected.
+        let is_time = matches!(dim_type, DimensionType::Time);
+        let expr = if is_time {
+            as_text(&raw_expr, dialect)
+        } else {
+            raw_expr
+        };
         select.push(format!("{} as {}", expr, quote(member)));
         if !is_rows {
             group_by.push(expr);
         }
         columns.push(Column {
             key: member.clone(),
-            kind: "dimension".into(),
+            // `time`, not `dimension`, when the member IS a time: the kind is
+            // what the client formats and drills on, and "drill into
+            // created_at = 2026-08-17 04:07:00+00" is a filter matching one
+            // row. Bucketed time dimensions have always reported `time`.
+            kind: if is_time { "time" } else { "dimension" }.into(),
             drill_entity: cube
                 .dimensions
                 .get(field)

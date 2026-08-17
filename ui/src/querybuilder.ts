@@ -223,8 +223,12 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
           kind: c.kind,
           drillEntity: c.drill_entity,
           // Measure columns inherit the widget's format ("50" → "50%"), and
-          // percent measures band into score pills unless overridden.
-          format: over?.format ?? (c.kind === 'measure' ? draft.format : undefined),
+          // percent measures band into score pills unless overridden. A time
+          // column formats as a date — the engine hands back
+          // `2026-08-17 04:07:00+00`, which is a timestamp, not a label.
+          format:
+            over?.format ??
+            (c.kind === 'time' ? 'date' : c.kind === 'measure' ? draft.format : undefined),
           pill:
             over?.pill ??
             (c.kind === 'measure' && (over?.format ?? draft.format) === 'percent' ? 'band' : undefined),

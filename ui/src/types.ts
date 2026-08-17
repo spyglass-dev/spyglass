@@ -46,7 +46,7 @@ export interface WidgetBase {
   applied?: AppliedFilters
 }
 
-export type ValueFormat = 'number' | 'percent' | 'currency' | 'text'
+export type ValueFormat = 'number' | 'percent' | 'currency' | 'text' | 'date'
 
 export interface MetricSpec extends WidgetBase {
   type: 'metric'
@@ -218,10 +218,59 @@ export interface ReportDoc {
   widgets: WidgetSpec[]
 }
 
+/**
+ * A stat tile's value is read at a glance, so it is COMPACT and never carries
+ * float noise: an average of 2.5906976744 is "2.6", not "2.591". `toLocaleString`
+ * with no options keeps three fraction digits and no grouping threshold, which
+ * is how a dashboard ends up with `2.591` next to `1,284`.
+ *
+ * Counts stay exact up to 5 digits and compact above (`12.9K`, `4.2M`) — the
+ * magnitude is the message at that size, and the exact figure lives in the
+ * table underneath.
+ */
+export function formatNumber(value: number): string {
+  if (!Number.isFinite(value)) return '—'
+  const abs = Math.abs(value)
+  if (!Number.isInteger(value) && abs < 1000) {
+    // A ratio or an average: one decimal, and no trailing ".0".
+    return String(Math.round(value * 10) / 10)
+  }
+  if (abs >= 100_000) {
+    return value.toLocaleString(undefined, { notation: 'compact', maximumFractionDigits: 1 })
+  }
+  return Math.round(value).toLocaleString()
+}
+
+/**
+ * Parse an engine timestamp. Postgres renders `timestamptz::text` as
+ * `2026-04-01 00:00:00+00` — a space instead of `T`, and a two-digit offset
+ * that `Date.parse` rejects outright (`+00` must be `+00:00`). Both have to be
+ * repaired or every date in every client is silently NaN.
+ */
+export function parseTimestamp(value: number | string): number {
+  if (typeof value === 'number') return value
+  const iso = value.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00')
+  return Date.parse(iso)
+}
+
+/** A date/datetime cell (`kind: "time"`), rendered short. Engine time values
+ *  are ISO-ish text; anything unparseable passes through untouched. */
+export function formatDateValue(value: number | string): string {
+  const d = new Date(parseTimestamp(value))
+  if (Number.isNaN(d.getTime())) return String(value)
+  const sameYear = d.getFullYear() === new Date().getFullYear()
+  return d.toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  })
+}
+
 export function formatValue(value: number | string, format?: ValueFormat): string {
+  if (format === 'date') return formatDateValue(value)
   if (typeof value === 'string') return value
-  if (format === 'percent') return `${Math.round(value)}%`
+  if (format === 'percent') return `${Math.round(value * 10) / 10}%`
   if (format === 'currency') return value.toLocaleString(undefined, { style: 'currency', currency: 'USD' })
-  if (format === 'number') return value.toLocaleString()
+  if (format === 'number') return formatNumber(value)
   return String(value)
 }
