@@ -11,7 +11,14 @@
  * Conflating these is the classic way a gradebook lies.
  */
 import type { CSSProperties } from 'react'
-import { formatValue, type PivotSpec, type PivotTotal, type ValueFormat } from '../types'
+import {
+  formatDateValue,
+  formatValue,
+  parseTimestamp,
+  type PivotSpec,
+  type PivotTotal,
+  type ValueFormat,
+} from '../types'
 import { humanizeMember } from '../querybuilder'
 import { tokens } from '../tokens'
 
@@ -60,9 +67,62 @@ function axisLabel(row: Record<string, unknown>, members: string[]): string {
     .map((m) => {
       const label = row[`${m}__label`]
       const v = label ?? row[m]
-      return v == null ? '—' : String(v)
+      if (v == null) return '—'
+      // A time member's raw value is `2026-08-01 00:00:00+00`. A cohort
+      // triangle whose rows read like that is a debug dump, not a header.
+      return isTimestampish(v) ? formatDateValue(String(v)) : String(v)
     })
     .join(' / ')
+}
+
+const isTimestampish = (v: unknown): boolean =>
+  typeof v === 'string' && /^\d{4}-\d{2}-\d{2}([ T]|$)/.test(v)
+
+/**
+ * Axis order. First appearance is right for a query whose ORDER BY put the
+ * axis in the order it wants — but a pivot has TWO axes and the query can only
+ * sort one. The other arrives in whatever order the rows happened to carry,
+ * which is how a cohort triangle's weeks came out `0 1 2 3 9 4 5 6 7 8`.
+ *
+ * So: numeric axes sort numerically, dates chronologically, and anything else
+ * keeps first-appearance order — the case the query really is controlling.
+ */
+function sortAxis(items: PivotAxisItem[], values: Map<string, unknown>): PivotAxisItem[] {
+  const raw = items.map((i) => values.get(i.key))
+  const allNumeric =
+    raw.length > 0 && raw.every((v) => v !== null && v !== '' && !Number.isNaN(Number(v)))
+  if (allNumeric) {
+    return [...items].sort((a, b) => Number(values.get(a.key)) - Number(values.get(b.key)))
+  }
+  const allDates = raw.length > 0 && raw.every((v) => isTimestampish(v))
+  if (allDates) {
+    const sorted = [...items].sort(
+      (a, b) =>
+        parseTimestamp(String(values.get(a.key))) - parseTimestamp(String(values.get(b.key))),
+    )
+    // Label to the BUCKET, not the instant. A cohort axis of month buckets
+    // reads "Jun 2026"; labelling each one "Jun 1" describes a day nothing
+    // happened on.
+    const dates = sorted.map((i) => new Date(parseTimestamp(String(values.get(i.key)))))
+    // UTC throughout: the engine buckets in UTC, and a UTC midnight is 08:00
+    // in Singapore — read locally, no bucket ever looks like a bucket.
+    const monthly = dates.every(
+      (d) => d.getUTCDate() === 1 && d.getUTCHours() === 0 && d.getUTCMinutes() === 0,
+    )
+    const yearly = monthly && dates.every((d) => d.getUTCMonth() === 0)
+    if (!monthly) return sorted
+    return sorted.map((item, i) => ({
+      ...item,
+      label: yearly
+        ? String(dates[i].getUTCFullYear())
+        : dates[i].toLocaleDateString(undefined, {
+            month: 'short',
+            year: 'numeric',
+            timeZone: 'UTC',
+          }),
+    }))
+  }
+  return [...items]
 }
 
 function aggregate(values: number[], how: 'avg' | 'sum'): number | undefined {
@@ -109,6 +169,10 @@ export function buildPivot(spec: PivotSpec): BuiltPivot {
   const rowIndex = new Map<string, number>()
   const colIndex = new Map<string, number>()
   const cells = new Map<string, PivotCell>()
+  // The raw axis values, kept so the axes can be ordered by what they ARE
+  // (a number, a date) rather than by the order the rows arrived in.
+  const rowValues = new Map<string, unknown>()
+  const colValues = new Map<string, unknown>()
 
   // First-appearance order on both axes — the query's ORDER BY decides.
   for (const row of spec.data) {
@@ -117,10 +181,12 @@ export function buildPivot(spec: PivotSpec): BuiltPivot {
     if (!rowIndex.has(rk)) {
       rowIndex.set(rk, rowItems.length)
       rowItems.push({ key: rk, label: axisLabel(row, spec.rows) })
+      if (spec.rows.length === 1) rowValues.set(rk, row[spec.rows[0]])
     }
     if (!colIndex.has(ck)) {
       colIndex.set(ck, colItems.length)
       colItems.push({ key: ck, label: axisLabel(row, spec.cols) })
+      if (spec.cols.length === 1) colValues.set(ck, row[spec.cols[0]])
     }
     const raw = row[spec.measure]
     const cell: PivotCell =
@@ -130,10 +196,13 @@ export function buildPivot(spec: PivotSpec): BuiltPivot {
     cells.set(rk + SEP + ck, cell)
   }
 
-  const truncatedRows = Math.max(0, rowItems.length - MAX_PIVOT_ROWS)
-  const truncatedCols = Math.max(0, colItems.length - MAX_PIVOT_COLS)
-  const keptRows = rowItems.slice(0, MAX_PIVOT_ROWS)
-  const keptCols = colItems.slice(0, MAX_PIVOT_COLS)
+  const orderedRows = sortAxis(rowItems, rowValues)
+  const orderedCols = sortAxis(colItems, colValues)
+
+  const truncatedRows = Math.max(0, orderedRows.length - MAX_PIVOT_ROWS)
+  const truncatedCols = Math.max(0, orderedCols.length - MAX_PIVOT_COLS)
+  const keptRows = orderedRows.slice(0, MAX_PIVOT_ROWS)
+  const keptCols = orderedCols.slice(0, MAX_PIVOT_COLS)
 
   // Totals aggregate the numbers that EXIST. An absent combination joins in
   // only under `empty: 'zero'` (where the widget claims absent means 0);

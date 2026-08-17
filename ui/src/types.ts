@@ -93,7 +93,13 @@ export interface TableSpec extends WidgetBase {
   bars?: string
 }
 
-export type ChartMark = 'bar' | 'line' | 'area' | 'point' | 'progress'
+/**
+ * `bar` columns · `hbar` bars on their side, for long category names and
+ * rankings · `line` / `area` over time · `point` scatter · `arc` a donut for
+ * part-to-whole (bounded: past six slices the tail folds into "Other") ·
+ * `progress` a CSS meter against a ceiling.
+ */
+export type ChartMark = 'bar' | 'hbar' | 'line' | 'area' | 'point' | 'arc' | 'progress'
 
 export interface ChartSpec extends WidgetBase {
   type: 'chart'

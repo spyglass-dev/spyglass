@@ -97,6 +97,7 @@ export interface ReportToolsConfig {
 /** Agent-readable widget vocabulary for the tool schemas + skills. */
 export const WIDGET_VOCAB = [
   'bound — a data widget backed by a query: { type:"bound", as:"metric"|"table"|"chart", query:{ measures:["Cube.measure"], dimensions?:["Cube.dimension"], filters?, timeDimensions? }, title?, w?, label?, format?, mark?, x?, y? }. PREFER this for data.',
+  'chart marks: bar (columns) · hbar (sideways — use for rankings and long category names) · line/area (over time) · point · arc (a donut for part-to-whole; past 6 slices the tail folds into "Other") · progress (a meter). A grid/heatmap is as:"pivot" with pivot.scale:"sequential".',
   'bound chart, MULTIPLE SERIES: y can be an array of measures ({ y:["Cube.a","Cube.b"] } → one series each), and color names a member to split by ({ dimensions:["Cube.workspace_id"], color:"Cube.workspace_id" } → one line per workspace). Add stack:false to group bars instead of stacking. Group by the member you color by, or there is only one series.',
   'metric — a static scalar: { type:"metric", value, label?, format?, w? }',
   'table — static rows: { type:"table", columns:[{key,label}], rows:[…], w? }',

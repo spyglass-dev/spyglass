@@ -1,5 +1,6 @@
 /**
- * Chart — bar / line / area / point / progress from a compact JSON encoding.
+ * Chart — bar / hbar / line / area / point / arc / progress from a compact
+ * JSON encoding.
  *
  * The encoding (mark + x/y/color over a series) is deliberately small and
  * stable so the agent can author it reliably. It compiles to a Vega-Lite spec
@@ -119,6 +120,28 @@ function isTimestamp(v: string): boolean {
   return /^\d{4}-\d{2}-\d{2}([ T]|$)/.test(v) && !Number.isNaN(parseTimestamp(v))
 }
 
+/** Past this many slices a donut is a colour wheel, so the tail becomes
+ *  "Other" — the honest way to keep the form usable. */
+const MAX_SLICES = 6
+
+/** Keep the biggest `keep - 1` categories and sum the rest into "Other",
+ *  preserving the incoming order of the survivors. */
+function foldTail(
+  values: Record<string, unknown>[],
+  category: string,
+  value: string,
+  keep: number,
+): Record<string, unknown>[] {
+  if (values.length <= keep) return values
+  const ranked = [...values].sort((a, b) => (Number(b[value]) || 0) - (Number(a[value]) || 0))
+  const kept = new Set(ranked.slice(0, keep - 1).map((r) => String(r[category])))
+  const head = values.filter((r) => kept.has(String(r[category])))
+  const tail = values
+    .filter((r) => !kept.has(String(r[category])))
+    .reduce((sum, r) => sum + (Number(r[value]) || 0), 0)
+  return [...head, { [category]: 'Other', [value]: tail }]
+}
+
 const DAY = 86_400_000
 /** The bucket a time series is stepped in, read off the smallest gap between
  *  two distinct points. Undefined for a single point (nothing to measure). */
@@ -195,6 +218,79 @@ function toVegaLite(chart: ChartSpec['chart']): VlSpec {
       color = color ?? folded.color
     } else {
       y = y[0] ?? ''
+    }
+  }
+
+  // ── Part-to-whole: a donut ────────────────────────────────────────────
+  //
+  // Angles are read badly and a pie of ten close slices is the classic bad
+  // chart, so this one is BOUNDED rather than trusted: slices past the sixth
+  // fold into "Other", the categories keep the order the query returned them
+  // in, and the tooltip carries the share so nobody has to estimate an angle.
+  // Inside those bounds — "what proportion of the work is grading" — it is the
+  // form that answers the question at a glance.
+  if (mark === 'arc') {
+    const yField = typeof y === 'string' ? y : (y as string[])[0] ?? ''
+    const sliced = foldTail(values, xField, yField, MAX_SLICES)
+    const total = sliced.reduce((sum, r) => sum + (Number(r[yField]) || 0), 0) || 1
+    return {
+      $schema: 'https://vega.github.io/schema/vega-lite/v6.json',
+      data: {
+        values: sliced.map((r) => ({ ...r, _share: ((Number(r[yField]) || 0) / total) * 100 })),
+      },
+      mark: { type: 'arc', innerRadius: 52, stroke: '#fff', strokeWidth: 2, tooltip: true },
+      encoding: {
+        theta: { field: esc(yField), type: 'quantitative', stack: true },
+        color: {
+          field: esc(xField),
+          type: 'nominal',
+          title: null,
+          sort: null,
+          legend: { orient: 'right' },
+        },
+        tooltip: [
+          { field: esc(xField), type: 'nominal', title: 'Category' },
+          { field: esc(yField), type: 'quantitative', title: 'Value', format: ',' },
+          { field: '_share', type: 'quantitative', title: 'Share', format: '.1f' },
+        ],
+      },
+      width: 'container',
+      height: 220,
+      autosize: { type: 'fit', contains: 'padding' },
+      config: CHART_CONFIG,
+    }
+  }
+
+  // ── Long category names: bars on their side ───────────────────────────
+  //
+  // A vertical bar chart gives each label the width of one band, so
+  // `question_evaluated` and `Riverside Primary` come out ellipsised to
+  // `question_evalua…`. Horizontal bars give the label the whole left gutter
+  // and the plot grows downward, which is also the right shape for a ranking:
+  // you read the order down the page.
+  if (mark === 'hbar') {
+    const yField = typeof y === 'string' ? y : (y as string[])[0] ?? ''
+    return {
+      $schema: 'https://vega.github.io/schema/vega-lite/v6.json',
+      data: { values },
+      mark: { type: 'bar', tooltip: true, cornerRadiusTopRight: 3, cornerRadiusBottomRight: 3 },
+      encoding: {
+        y: {
+          field: esc(xField),
+          type: 'nominal',
+          title: null,
+          sort: null,
+          axis: { labelLimit: 180 },
+        },
+        x: { field: esc(yField), type: 'quantitative', title: null, axis: valueAxis(format) },
+        ...(color ? { color: { field: esc(color), type: 'nominal', title: null } } : {}),
+      },
+      width: 'container',
+      // One row per category rather than a fixed height: twenty rows squeezed
+      // into 220px is a barcode.
+      height: { step: 24 },
+      autosize: { type: 'fit-x', contains: 'padding' },
+      config: CHART_CONFIG,
     }
   }
 

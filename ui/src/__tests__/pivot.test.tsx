@@ -306,3 +306,62 @@ describe('pivot polish (mock parity)', () => {
     expect(screen.getByText(/— no record/)).toBeTruthy()
   })
 })
+
+/**
+ * A pivot has TWO axes and a query can only sort one, so the other arrives in
+ * whatever order the rows happened to carry. A cohort triangle came out with
+ * its weeks running `0 1 2 3 9 4 5 6 7 8` — and its rows labelled
+ * `2026-08-01 00:00:00+00`.
+ */
+describe('pivot axes order and read like what they are', () => {
+  const cohort = {
+    type: 'pivot' as const,
+    rows: ['C.cohort_month'],
+    cols: ['C.week'],
+    measure: 'C.workspaces',
+    // Deliberately the order the engine returned: newest cohort first, weeks
+    // in first-appearance order.
+    data: [
+      { 'C.cohort_month': '2026-08-01 00:00:00+00', 'C.week': 0, 'C.workspaces': 8 },
+      { 'C.cohort_month': '2026-08-01 00:00:00+00', 'C.week': 1, 'C.workspaces': 1 },
+      { 'C.cohort_month': '2026-06-01 00:00:00+00', 'C.week': 9, 'C.workspaces': 1 },
+      { 'C.cohort_month': '2026-06-01 00:00:00+00', 'C.week': 2, 'C.workspaces': 1 },
+    ],
+  }
+
+  it('sorts a numeric axis numerically, whatever order the rows arrived in', () => {
+    const built = buildPivot(cohort)
+    expect(built.cols.map((c) => c.label)).toEqual(['0', '1', '2', '9'])
+  })
+
+  it('sorts a date axis chronologically and labels it as a date', () => {
+    const built = buildPivot(cohort)
+    expect(built.rows.map((r) => r.item.label)).toEqual(['Jun 2026', 'Aug 2026'])
+  })
+
+  it('keeps the cells with their headers through the reorder', () => {
+    const built = buildPivot(cohort)
+    const aug = built.rows[1]
+    // week 0 → 8, week 1 → 1, weeks 2 and 9 absent for August.
+    expect(aug.cells.map((c) => (c.state === 'value' ? c.value : c.state))).toEqual([
+      8,
+      1,
+      'absent',
+      'absent',
+    ])
+  })
+
+  it('leaves a categorical axis in the order the query chose', () => {
+    const built = buildPivot({
+      type: 'pivot',
+      rows: ['S.class'],
+      cols: ['S.status'],
+      measure: 'S.n',
+      data: [
+        { 'S.class': 'P5', 'S.status': 'graded', 'S.n': 3 },
+        { 'S.class': 'P5', 'S.status': 'awaiting', 'S.n': 1 },
+      ],
+    })
+    expect(built.cols.map((c) => c.label)).toEqual(['graded', 'awaiting'])
+  })
+})
