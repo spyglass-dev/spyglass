@@ -152,6 +152,14 @@ const esc = (field: unknown) => String(field ?? '').replace(/\./g, '\\.')
  * Before this, an array `y` reached `field.replace` and threw, which took the
  * whole page down — one agent-authored widget, a white screen, no report.
  */
+/** A legend entry a reader can read: `Events.lessons_authored` is "Lessons
+ *  authored", not the member name with its underscores showing. */
+function seriesLabel(member: string): string {
+  const field = member.split('.').pop() ?? member
+  const words = field.replace(/_/g, ' ').trim()
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
 function foldSeries(
   values: Record<string, unknown>[],
   ys: string[],
@@ -160,7 +168,7 @@ function foldSeries(
   const out: Record<string, unknown>[] = []
   for (const row of values) {
     for (const y of ys) {
-      out.push({ [xField]: row[xField], _series: y.split('.').pop() ?? y, _value: row[y] })
+      out.push({ [xField]: row[xField], _series: seriesLabel(y), _value: row[y] })
     }
   }
   return { values: out, y: '_value', color: '_series' }
@@ -204,9 +212,23 @@ function toVegaLite(chart: ChartSpec['chart']): VlSpec {
       ...(timeUnit ? { timeUnit } : {}),
       // Straight, ellipsis-truncated category labels — never rotated text
       // (the default -90° spin is the loudest "unstyled Vega" signal).
+      //
+      // `sort: null` means "the order the rows arrived in". Vega-Lite's
+      // default is ALPHABETICAL, which silently threw away the query's own
+      // `ORDER BY`: a histogram of engagement bands ordered never → 1 day →
+      // 2-4 → 5-14 → 15+ came out as `1 day · 15+ days · 2-4 days · 5-14
+      // days`, and a bar chart ordered by size came out in name order. The
+      // engine sorted the rows on purpose; the chart's job is to draw them.
       ...(xt === 'nominal'
-        ? { axis: { labelAngle: 0, labelLimit: 96, labelOverlap: 'parity' }, scale: { paddingInner: 0.35, paddingOuter: 0.15 } }
+        ? {
+            sort: null,
+            axis: { labelAngle: 0, labelLimit: 96, labelOverlap: 'parity' },
+            scale: { paddingInner: 0.35, paddingOuter: 0.15 },
+          }
         : {}),
+      // A temporal axis with more ticks than room overlaps its labels into
+      // porridge ("Npr2026Way 2026" — two months drawn on top of each other).
+      ...(xt === 'temporal' ? { axis: { labelOverlap: 'greedy', labelAngle: 0 } } : {}),
     },
     y: { field: esc(y), type: 'quantitative', title: null, axis: valueAxis(format) },
   }
@@ -222,15 +244,27 @@ function toVegaLite(chart: ChartSpec['chart']): VlSpec {
   }
 
   // A couple of categories stretched across a full-width container become
-  // slabs — size the plot to the data instead (a fixed step per category,
-  // capped), and let it sit left in the frame like any other small chart.
-  const fewBars = vmark === 'bar' && xt === 'nominal' && values.length <= 5
+  // slabs, so bar THICKNESS is capped — but the plot still takes the width of
+  // its container.
+  //
+  // Sizing the plot to the data instead (150px per category, capped at 640)
+  // was the earlier fix, and it silently cut data off: five bands in a
+  // half-width widget rendered a 640px SVG inside a 506px box, so the fifth
+  // bar and its label were drawn outside the frame. Every bar was in the DOM
+  // and the reader could only see four. A chart must never be wider than the
+  // thing it is drawn in.
+  const slabRisk = vmark === 'bar' && xt === 'nominal' && !color && values.length <= 6
   return {
     $schema: 'https://vega.github.io/schema/vega-lite/v6.json',
     data: { values },
-    mark: { type: vmark, tooltip: true, ...(mark === 'point' ? { filled: true } : {}) },
+    mark: {
+      type: vmark,
+      tooltip: true,
+      ...(slabRisk ? { size: 88 } : {}),
+      ...(mark === 'point' ? { filled: true } : {}),
+    },
     encoding,
-    width: fewBars ? Math.min(values.length * 150, 640) : 'container',
+    width: 'container',
     height: 220,
     autosize: { type: 'fit', contains: 'padding' },
     config: CHART_CONFIG,

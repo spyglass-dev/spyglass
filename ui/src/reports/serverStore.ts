@@ -69,8 +69,20 @@ export function createServerReportStore<B extends ReportBody = ReportBody>(
             method: 'POST',
             body: JSON.stringify({ id, title, doc: body }),
           })
-        } catch (e) {
-          swallow(e)
+        } catch (createError) {
+          // The row exists NOW even though the PUT above said it did not:
+          // two writers raced for one client-minted id. That is ordinary for
+          // a shared id — two people opening the same template link, or a
+          // component that saves twice on mount — and the loser used to give
+          // up with a duplicate-key 500 in the log. Update instead.
+          try {
+            await apiFetch<ServerReport<B>>(`${base}/${id}`, {
+              method: 'PUT',
+              body: JSON.stringify({ title, doc: body }),
+            })
+          } catch {
+            swallow(createError)
+          }
         }
       }
     },

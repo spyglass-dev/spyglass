@@ -36,33 +36,61 @@ function renderInline(text: string, keyBase: string): ReactNode[] {
   return out
 }
 
+/** Split into blocks a note actually uses: each heading LINE is its own block,
+ *  and runs of other lines are paragraphs. Splitting on blank lines alone was
+ *  not enough — `### Section\nOne line about it` is one block whose whole text
+ *  does not match the heading pattern, so it rendered with its hashes showing,
+ *  which is the exact bug the plain-text renderer exists to avoid. */
+function blocksOf(markdown: string): { heading?: number; text: string }[] {
+  const out: { heading?: number; text: string }[] = []
+  for (const para of markdown.split(/\n{2,}/)) {
+    let buffer: string[] = []
+    const flush = () => {
+      if (buffer.join('\n').trim()) out.push({ text: buffer.join('\n') })
+      buffer = []
+    }
+    for (const line of para.split('\n')) {
+      const h = /^(#{1,3})\s+(.*)$/.exec(line.trim())
+      if (h) {
+        flush()
+        out.push({ heading: h[1].length, text: h[2] })
+      } else {
+        buffer.push(line)
+      }
+    }
+    flush()
+  }
+  return out
+}
+
 export function Note({ spec }: { spec: NoteSpec }) {
-  const blocks = spec.markdown.split(/\n{2,}/)
   return (
     <div style={{ fontSize: 14, lineHeight: 1.6, color: tokens.text }}>
-      {blocks.map((block, bi) => {
-        const heading = /^(#{1,3})\s+(.*)$/.exec(block.trim())
-        if (heading) {
-          const level = heading[1].length
-          return (
-            <div
-              key={bi}
-              style={{
-                fontWeight: 700,
-                fontSize: level === 1 ? 18 : level === 2 ? 16 : 14,
-                margin: bi === 0 ? '0 0 6px' : '10px 0 6px',
-              }}
-            >
-              {renderInline(heading[2], `h${bi}`)}
-            </div>
-          )
-        }
-        return (
-          <p key={bi} style={{ whiteSpace: 'pre-wrap', margin: bi === 0 ? 0 : '8px 0 0' }}>
-            {renderInline(block, `p${bi}`)}
+      {blocksOf(spec.markdown).map((block, bi) =>
+        block.heading ? (
+          <div
+            key={bi}
+            style={{
+              fontWeight: 700,
+              fontSize: block.heading === 1 ? 18 : block.heading === 2 ? 16 : 14,
+              margin: bi === 0 ? '0 0 6px' : '10px 0 6px',
+            }}
+          >
+            {renderInline(block.text, `h${bi}`)}
+          </div>
+        ) : (
+          <p
+            key={bi}
+            style={{
+              whiteSpace: 'pre-wrap',
+              margin: bi === 0 ? 0 : '4px 0 0',
+              color: tokens.textMuted,
+            }}
+          >
+            {renderInline(block.text, `p${bi}`)}
           </p>
-        )
-      })}
+        ),
+      )}
     </div>
   )
 }

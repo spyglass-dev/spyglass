@@ -128,3 +128,88 @@ describe('bars over time', () => {
     expect((vl.encoding as Record<string, { type: string }>).x.type).toBe('nominal')
   })
 })
+
+describe('a chart draws the rows in the order the query returned them', () => {
+  const bands = [
+    { band: 'Never active', n: 5 },
+    { band: '1 day', n: 30 },
+    { band: '2-4 days', n: 6 },
+    { band: '5-14 days', n: 1 },
+    { band: '15+ days', n: 2 },
+  ]
+
+  it('keeps an ordinal axis in its own order, not alphabetical', async () => {
+    // Vega-Lite sorts a nominal axis alphabetically by default, which threw
+    // away the query's ORDER BY: this exact histogram rendered
+    // `1 day · 15+ days · 2-4 days · 5-14 days` and lost its shape.
+    const { toVegaLiteForTest } = await import('../components/Chart')
+    const vl = toVegaLiteForTest({ mark: 'bar', x: 'band', y: 'n', series: bands })
+    expect((vl.encoding as Record<string, { sort?: unknown }>).x.sort).toBeNull()
+  })
+
+  it('leaves a temporal axis to the scale, and stops its labels colliding', async () => {
+    const { toVegaLiteForTest } = await import('../components/Chart')
+    const vl = toVegaLiteForTest({
+      mark: 'line',
+      x: 'day',
+      y: 'n',
+      series: [
+        { day: '2026-04-01 00:00:00+00', n: 1 },
+        { day: '2026-05-01 00:00:00+00', n: 2 },
+      ],
+    })
+    const x = (vl.encoding as Record<string, { sort?: unknown; axis?: { labelOverlap?: string } }>).x
+    expect(x.sort).toBeUndefined()
+    expect(x.axis?.labelOverlap).toBe('greedy')
+  })
+})
+
+describe('a note heading followed by its own sentence', () => {
+  it('renders the heading, not the hashes', async () => {
+    // `### Retention\nA rate is a snapshot` is ONE block, and the whole-block
+    // pattern did not match it, so the report showed `### Retention`.
+    const { render, screen } = await import('@testing-library/react')
+    const { Note } = await import('../components/Note')
+    render(<Note spec={{ type: 'note', markdown: '### Retention\nA rate is a snapshot.' }} />)
+    expect(screen.getByText('Retention')).toBeTruthy()
+    expect(screen.queryByText(/###/)).toBeNull()
+    expect(screen.getByText('A rate is a snapshot.')).toBeTruthy()
+  })
+})
+
+describe('a chart is never wider than the box it is drawn in', () => {
+  it('takes the container width even with a handful of categories', async () => {
+    // Sizing the plot to the data (150px per category) put a 640px SVG inside
+    // a 506px widget: the fifth band and its label were drawn outside the
+    // frame, present in the DOM and invisible to the reader.
+    const { toVegaLiteForTest } = await import('../components/Chart')
+    const vl = toVegaLiteForTest({
+      mark: 'bar',
+      x: 'band',
+      y: 'n',
+      series: [
+        { band: 'Never active', n: 5 },
+        { band: '1 day', n: 30 },
+        { band: '2-4 days', n: 6 },
+        { band: '5-14 days', n: 1 },
+        { band: '15+ days', n: 2 },
+      ],
+    })
+    expect(vl.width).toBe('container')
+    // Thickness is what stops two categories becoming slabs, not plot width.
+    expect((vl.mark as { size?: number }).size).toBe(88)
+  })
+
+  it('leaves grouped bars to the band, which already sizes them', async () => {
+    const { toVegaLiteForTest } = await import('../components/Chart')
+    const vl = toVegaLiteForTest({
+      mark: 'bar',
+      x: 'month',
+      y: 'n',
+      color: 'series',
+      stack: false,
+      series: [{ month: 'Jan', n: 1, series: 'a' }, { month: 'Jan', n: 2, series: 'b' }],
+    })
+    expect((vl.mark as { size?: number }).size).toBeUndefined()
+  })
+})
