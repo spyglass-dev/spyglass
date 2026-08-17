@@ -31,3 +31,15 @@ DIFFERENT flow from building a whole report.
   "mark": "bar",
   "query": { "measures": ["Scores.avg_score"], "dimensions": ["Scores.student_id"] } } }
 ```
+
+Several series on one chart: `y` as an array plots each measure, and `color`
+splits by a member — group by that member, or there is only one line.
+
+```json
+{ "widget": { "type": "bound", "as": "chart", "title": "Submissions per day by class",
+  "mark": "line", "x": "Submissions.created_at", "y": "Submissions.count",
+  "color": "Submissions.class_id",
+  "query": { "measures": ["Submissions.count"], "dimensions": ["Submissions.class_id"],
+    "timeDimensions": [{ "dimension": "Submissions.created_at", "granularity": "day",
+      "dateRange": "last 30 days" }] } } }
+```

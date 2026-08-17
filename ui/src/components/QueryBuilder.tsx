@@ -107,13 +107,35 @@ export function QueryBuilder({
             ))}
           </div>
           {value.as === 'chart' && (
-            <div className="mt-1.5 flex gap-1">
-              {MARKS.map((m) => (
-                <Chip key={m} on={(value.mark ?? 'bar') === m} onClick={() => onChange({ ...value, mark: m })}>
-                  {m}
-                </Chip>
-              ))}
-            </div>
+            <>
+              <div className="mt-1.5 flex gap-1">
+                {MARKS.map((m) => (
+                  <Chip key={m} on={(value.mark ?? 'bar') === m} onClick={() => onChange({ ...value, mark: m })}>
+                    {m}
+                  </Chip>
+                ))}
+              </div>
+              {/* Split by: one series per value of a group-by member. Only
+                  group-by members are offered — colouring by something the
+                  query does not return gives one series and a silent lie. */}
+              {dimensions.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                  <span className="text-xs text-muted-foreground">Split by</span>
+                  <Chip on={!value.color} onClick={() => onChange({ ...value, color: undefined })}>
+                    none
+                  </Chip>
+                  {dimensions.map((d) => (
+                    <Chip
+                      key={d}
+                      on={value.color === d}
+                      onClick={() => onChange({ ...value, color: value.color === d ? undefined : d })}
+                    >
+                      {d.split('.').pop()}
+                    </Chip>
+                  ))}
+                </div>
+              )}
+            </>
           )}
           {value.as === 'pivot' && (
             <div className="mt-1 text-xs text-muted-foreground">

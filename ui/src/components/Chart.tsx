@@ -233,7 +233,9 @@ export function Chart({ spec }: { spec: ChartSpec }) {
 
   // progress — a compact CSS bar per row (value / max), no chart lib needed.
   if (mark === 'progress') {
-    const values = nums(series, y)
+    // `progress` is one bar per row against a ceiling — a single value field.
+    // An array `y` (multi-series) takes the first measure rather than throwing.
+    const values = nums(series, Array.isArray(y) ? y[0] ?? '' : y)
     const cats = labels(series, x)
     const ceiling = max ?? 100
     return (
