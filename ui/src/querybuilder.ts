@@ -104,7 +104,17 @@ export interface WidgetDraft {
   format?: ValueFormat
   mark?: ChartMark
   x?: string
-  y?: string
+  /** Chart value field. An ARRAY means "these measures on one chart" —
+   *  `Chart` folds them into one series per measure (submissions against
+   *  graded). It has always rendered that; the draft could not express it. */
+  y?: string | string[]
+  /** Chart series split: a member whose values become colored series — one
+   *  line per workspace, grouped or stacked bars. Pair it with a group-by on
+   *  the same member, which is what produces one row per series per x. */
+  color?: string
+  /** Bar/area with `color`: `false` groups the series side-by-side instead of
+   *  stacking them (the default). */
+  stack?: boolean
   /** Pivot rendering options (`as: 'pivot'`): edge totals (incl. `ratio`
    *  weighted totals), shading, and how absent combinations render. */
   pivot?: Pick<PivotSpec, 'totals' | 'scale' | 'empty'>
@@ -251,14 +261,35 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
     }
     return draftToWidgetSpec({ ...draft, as: 'table' }, result)
   }
-  const x = draft.x ?? result.columns.find((c) => c.kind !== 'measure')?.key
+  // The x default skips a `color` split member: with `dimensions:
+  // [workspace_id]` and a daily bucket, the first non-measure column is the
+  // workspace, and defaulting x to it drew one bar per workspace instead of a
+  // line per workspace over time.
+  const categorical = result.columns.filter((c) => c.kind !== 'measure' && !c.key.endsWith('__label'))
+  const x =
+    draft.x ??
+    (categorical.find((c) => c.key !== draft.color) ?? categorical[0])?.key
   const y =
     draft.y ?? draft.query.measures?.[0] ?? result.columns.find((c) => c.kind === 'measure')?.key ?? ''
+  // A split member with a declared label (`workspace_id` → its name) colors by
+  // the LABEL: a legend of UUIDs names nothing an operator recognises.
+  const color =
+    draft.color && result.columns.some((c) => c.key === `${draft.color}__label`)
+      ? `${draft.color}__label`
+      : draft.color
   return {
     type: 'chart',
     title: draft.title,
     w: 2,
-    chart: { mark: draft.mark ?? 'bar', x, y, series: result.rows, format: draft.format },
+    chart: {
+      mark: draft.mark ?? 'bar',
+      x,
+      y,
+      series: result.rows,
+      format: draft.format,
+      ...(color ? { color } : {}),
+      ...(draft.stack === undefined ? {} : { stack: draft.stack }),
+    },
   }
 }
 

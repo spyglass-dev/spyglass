@@ -371,8 +371,8 @@ export function rowsQueryFor(
 // ── Draft <-> bound widget ───────────────────────────────────────────────────
 
 export function widgetToDraft(b: BoundWidget): WidgetDraft {
-  const { as, query, title, label, format, mark, x, y, pivot } = b
-  return { as, query, title, label, format, mark, x, y, pivot }
+  const { as, query, title, label, format, mark, x, y, color, stack, pivot } = b
+  return { as, query, title, label, format, mark, x, y, color, stack, pivot }
 }
 export function draftToBound(draft: WidgetDraft, prev?: BoundWidget): BoundWidget {
   return {

@@ -101,8 +101,10 @@ export interface ChartSpec extends WidgetBase {
     mark: ChartMark
     /** Category/x field name within each series row. */
     x?: string
-    /** Value/y field name within each series row. */
-    y: string
+    /** Value/y field name within each series row. An ARRAY means "these
+     *  measures on one chart": the rows are folded to long form, one series
+     *  per measure. */
+    y: string | string[]
     series: Record<string, unknown>[]
     /** Optional field to split into colored series — grouped/stacked bars,
      *  multi-line charts, etc. */

@@ -97,6 +97,7 @@ export interface ReportToolsConfig {
 /** Agent-readable widget vocabulary for the tool schemas + skills. */
 export const WIDGET_VOCAB = [
   'bound — a data widget backed by a query: { type:"bound", as:"metric"|"table"|"chart", query:{ measures:["Cube.measure"], dimensions?:["Cube.dimension"], filters?, timeDimensions? }, title?, w?, label?, format?, mark?, x?, y? }. PREFER this for data.',
+  'bound chart, MULTIPLE SERIES: y can be an array of measures ({ y:["Cube.a","Cube.b"] } → one series each), and color names a member to split by ({ dimensions:["Cube.workspace_id"], color:"Cube.workspace_id" } → one line per workspace). Add stack:false to group bars instead of stacking. Group by the member you color by, or there is only one series.',
   'metric — a static scalar: { type:"metric", value, label?, format?, w? }',
   'table — static rows: { type:"table", columns:[{key,label}], rows:[…], w? }',
   'chart — static series: { type:"chart", chart:{ mark:"bar"|"line"|"area", x?, y, series:[…] }, w? }',
