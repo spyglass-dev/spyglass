@@ -9,7 +9,7 @@
  * verbatim for charts the compact encoding can't express. The `ChartSpec`
  * contract and call sites are unchanged either way.
  */
-import { lazy, Suspense, useMemo } from 'react'
+import { lazy, Suspense, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { VegaEmbedProps } from 'react-vega'
 import { parseTimestamp, type ChartSpec, type ValueFormat } from '../types'
 import { tokens } from '../tokens'
@@ -62,6 +62,37 @@ const CHART_CONFIG = {
   point: { color: CHART_SERIES[0], size: 70, filled: true },
   range: { category: [...CHART_SERIES] },
 } as const
+
+/**
+ * The Vega config, with its ink resolved from the host's `--rpt-chart-*`
+ * custom properties. Vega paints attribute values into SVG, so a `var()`
+ * reference cannot travel through the spec the way the CSS tokens do — the
+ * values are read once from the computed style of the chart's own container.
+ * With nothing defined, the stock light theme renders unchanged:
+ *
+ * - `--rpt-chart-axis-text` — axis + legend labels (default `#6b7280`)
+ * - `--rpt-chart-grid`     — gridlines (default `#f3f4f6`)
+ * - `--rpt-chart-domain`   — axis line + ticks (default `#e5e7eb`)
+ */
+function useChartConfig(): { ref: React.RefObject<HTMLDivElement | null>; config: Record<string, unknown> } {
+  const ref = useRef<HTMLDivElement>(null)
+  const [config, setConfig] = useState<Record<string, unknown>>(CHART_CONFIG as unknown as Record<string, unknown>)
+  useLayoutEffect(() => {
+    if (!ref.current) return
+    const style = getComputedStyle(ref.current)
+    const read = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback
+    const axisText = read('--rpt-chart-axis-text', '#6b7280')
+    const grid = read('--rpt-chart-grid', '#f3f4f6')
+    const domain = read('--rpt-chart-domain', '#e5e7eb')
+    if (axisText === '#6b7280' && grid === '#f3f4f6' && domain === '#e5e7eb') return
+    setConfig({
+      ...CHART_CONFIG,
+      axis: { ...CHART_CONFIG.axis, labelColor: axisText, titleColor: axisText, gridColor: grid, domainColor: domain, tickColor: domain },
+      legend: { ...CHART_CONFIG.legend, labelColor: axisText, titleColor: axisText },
+    })
+  }, [])
+  return { ref, config }
+}
 
 function nums(series: Record<string, unknown>[], key: string): number[] {
   return series.map((r) => {
@@ -369,16 +400,17 @@ function toVegaLite(chart: ChartSpec['chart']): VlSpec {
 
 export function Chart({ spec }: { spec: ChartSpec }) {
   const { mark, x, y, series, max, vlSpec } = spec.chart
+  const { ref, config } = useChartConfig()
 
   // Raw Vega-Lite escape hatch — render verbatim, injecting series as the
   // default dataset when the spec doesn't carry its own data.
   const rawSpec = useMemo<VlSpec | null>(() => {
     if (!vlSpec) return null
     // Theme as a DEFAULT — a raw spec carrying its own `config` wins outright.
-    const s = { width: 'container', config: CHART_CONFIG, ...vlSpec } as VlSpec
+    const s = { width: 'container', config, ...vlSpec } as VlSpec
     if (!('data' in s)) s.data = { values: series }
     return s
-  }, [vlSpec, series])
+  }, [vlSpec, series, config])
 
   const compiled = useMemo<VlSpec | null>(
     () => (vlSpec || mark === 'progress' || series.length === 0 ? null : toVegaLite(spec.chart)),
@@ -391,7 +423,7 @@ export function Chart({ spec }: { spec: ChartSpec }) {
 
   if (rawSpec) {
     return (
-      <div style={{ width: '100%' }}>
+      <div ref={ref} style={{ width: '100%' }}>
         <Suspense fallback={null}>
           <VegaEmbed spec={rawSpec as VegaEmbedProps['spec']} options={EMBED_OPTIONS} onError={() => {}} style={{ width: '100%' }} />
         </Suspense>
@@ -413,7 +445,7 @@ export function Chart({ spec }: { spec: ChartSpec }) {
           return (
             <div key={i} style={{ display: 'grid', gridTemplateColumns: '8rem 1fr auto', gap: 10, alignItems: 'center' }}>
               <span style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cats[i]}</span>
-              <div style={{ height: 8, borderRadius: 999, background: '#eef2f7', overflow: 'hidden' }}>
+              <div style={{ height: 8, borderRadius: 999, background: tokens.muted, overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${pct}%`, background: 'var(--rpt-primary, #6366f1)' }} />
               </div>
               <span style={{ fontSize: 12, color: tokens.textMuted, width: 44, textAlign: 'right' }}>{Math.round(values[i])}</span>
@@ -425,10 +457,15 @@ export function Chart({ spec }: { spec: ChartSpec }) {
   }
 
   return (
-    <div style={{ width: '100%' }}>
+    <div ref={ref} style={{ width: '100%' }}>
       {compiled && (
         <Suspense fallback={null}>
-          <VegaEmbed spec={compiled as VegaEmbedProps['spec']} options={EMBED_OPTIONS} onError={() => {}} style={{ width: '100%' }} />
+          <VegaEmbed
+            spec={{ ...compiled, config } as VegaEmbedProps['spec']}
+            options={EMBED_OPTIONS}
+            onError={() => {}}
+            style={{ width: '100%' }}
+          />
         </Suspense>
       )}
     </div>

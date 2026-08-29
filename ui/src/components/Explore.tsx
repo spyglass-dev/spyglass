@@ -35,6 +35,10 @@ export interface ExploreProps {
   /** The host's agent: turn an ask into a draft — REPLACING the current one
    *  (same object the chips edit). Return null to leave the draft unchanged. */
   onAsk?: (prompt: string, current: WidgetDraft) => Promise<WidgetDraft | null>
+  /** Start on this visualization instead of the shape-based auto-pick. The
+   *  switcher still overrides per session — this only seeds it, for hosts
+   *  where one view (usually the table) is the right first answer. */
+  defaultViz?: WidgetDraft['as']
 }
 
 const short = (member: string) => member.split('.').pop() ?? member
@@ -74,9 +78,9 @@ function chips(draft: WidgetDraft): { key: string; text: string; remove?: (d: Wi
   return out
 }
 
-export function Explore({ meta, runQuery, initial, onSave, onAsk }: ExploreProps) {
+export function Explore({ meta, runQuery, initial, onSave, onAsk, defaultViz }: ExploreProps) {
   const [draft, setDraft] = useState<WidgetDraft>(initial ?? emptyDraft())
-  const [vizOverride, setVizOverride] = useState<WidgetDraft['as'] | null>(null)
+  const [vizOverride, setVizOverride] = useState<WidgetDraft['as'] | null>(defaultViz ?? null)
   const [search, setSearch] = useState('')
   const [ask, setAsk] = useState('')
   const [asking, setAsking] = useState(false)
