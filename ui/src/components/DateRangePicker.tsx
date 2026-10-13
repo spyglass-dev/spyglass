@@ -46,7 +46,7 @@ export function DateRangePicker({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
       >
         <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
         {dateRangeLabel(filters)}
@@ -81,7 +81,7 @@ export function DateRangePicker({
                 type="date"
                 value={filters.dateFrom ?? ''}
                 onChange={(e) => setCustom({ dateFrom: e.target.value || undefined })}
-                className={`w-full rounded-md border bg-background px-2 py-1 text-xs text-foreground outline-none focus:border-primary ${
+                className={`w-full rounded-md border bg-card px-2 py-1 text-xs text-foreground outline-none focus:border-primary ${
                   isCustom ? 'border-primary/50' : 'border-border'
                 }`}
               />
@@ -90,7 +90,7 @@ export function DateRangePicker({
                 type="date"
                 value={filters.dateTo ?? ''}
                 onChange={(e) => setCustom({ dateTo: e.target.value || undefined })}
-                className={`w-full rounded-md border bg-background px-2 py-1 text-xs text-foreground outline-none focus:border-primary ${
+                className={`w-full rounded-md border bg-card px-2 py-1 text-xs text-foreground outline-none focus:border-primary ${
                   isCustom ? 'border-primary/50' : 'border-border'
                 }`}
               />

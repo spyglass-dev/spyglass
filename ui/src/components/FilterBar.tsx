@@ -128,7 +128,7 @@ export function FilterBar({
                       ? 'border-primary bg-primary/10 text-primary'
                       : prompt
                         ? 'border-amber-300 bg-amber-50/60 text-amber-700 hover:border-amber-400 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300'
-                        : 'border-border bg-background text-muted-foreground hover:border-primary/50'
+                        : 'border-border bg-card text-muted-foreground hover:border-primary/50'
                   }`}
                 >
                   {o.label}
@@ -219,7 +219,7 @@ function FacetMenu({
             ? 'border-primary bg-primary/10 text-primary'
             : prompt
               ? 'border-amber-300 bg-amber-50/60 text-amber-700 hover:border-amber-400 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300'
-              : 'border-border bg-background text-muted-foreground hover:border-primary/50'
+              : 'border-border bg-card text-muted-foreground hover:border-primary/50'
         }`}
       >
         {label}

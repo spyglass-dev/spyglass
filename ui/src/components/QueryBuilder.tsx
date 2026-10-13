@@ -88,7 +88,7 @@ export function QueryBuilder({
           <select
             value={cube.name}
             onChange={(e) => pickCube(e.target.value)}
-            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
+            className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-sm outline-none focus:border-primary"
           >
             {cubes.map((c) => (
               <option key={c.name} value={c.name}>
@@ -177,7 +177,7 @@ export function QueryBuilder({
             value={value.title ?? ''}
             onChange={(e) => onChange({ ...value, title: e.target.value || undefined })}
             placeholder="Optional widget title"
-            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
+            className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-sm outline-none focus:border-primary"
           />
         </Field>
       </div>
@@ -202,7 +202,7 @@ export function QueryBuilder({
         ) : error ? (
           <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>
         ) : preview ? (
-          <div className="rounded-lg bg-background p-3">
+          <div className="rounded-lg bg-card p-3">
             {preview.title && preview.type !== 'metric' && (
               <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                 {preview.title}
@@ -237,7 +237,7 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
       type="button"
       onClick={onClick}
       className={`rounded-md border px-2.5 py-1 text-xs font-medium capitalize transition-colors ${
-        on ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-background text-muted-foreground hover:border-primary/50'
+        on ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:border-primary/50'
       }`}
     >
       {children}
@@ -285,13 +285,13 @@ function JsonConfig({ value, onChange }: { value: WidgetDraft; onChange: (d: Wid
         onChange={(e) => setText(e.target.value)}
         spellCheck={false}
         rows={14}
-        className="w-full rounded-lg border border-border bg-background p-2 font-mono text-xs outline-none focus:border-primary"
+        className="w-full rounded-lg border border-border bg-card p-2 font-mono text-xs outline-none focus:border-primary"
       />
       {err && <div className="text-xs text-rose-600">{err}</div>}
       <button
         type="button"
         onClick={apply}
-        className="self-start rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted"
+        className="self-start rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium hover:bg-muted"
       >
         Apply config
       </button>

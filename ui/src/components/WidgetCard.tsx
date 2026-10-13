@@ -176,7 +176,7 @@ export function WidgetCard({ spec, children, actions, exporters = DEFAULT_WIDGET
       onMouseLeave={() => setHover(false)}
       onFocus={() => setHover(true)}
     >
-      {title || skipped || !metric ? (
+      {title || !metric ? (
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12, minHeight: 26 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             {title && (
@@ -195,7 +195,10 @@ export function WidgetCard({ spec, children, actions, exporters = DEFAULT_WIDGET
           {controls}
         </div>
       ) : (
-        <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2 }}>{controls}</div>
+        <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+          {skipped && !hover && <AllTimeChip reason={skipped} />}
+          {controls}
+        </div>
       )}
       <div ref={body} style={{ flex: 1, minWidth: 0, opacity: stale ? 0.55 : 1, transition: 'opacity 160ms' }}>
         {children}
