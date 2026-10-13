@@ -268,7 +268,8 @@ export function cellShade(
   if (!scale || scale === 'none' || max === min) return undefined
   if (scale === 'sequential') {
     const t = (value - min) / (max - min)
-    return `rgba(59, 130, 246, ${(0.06 + t * 0.3).toFixed(3)})`
+    // Shade in the host's accent, so the heatmap matches the rest of the report.
+    return `color-mix(in srgb, var(--rpt-accent, #3b82f6) ${Math.round((0.06 + t * 0.3) * 100)}%, transparent)`
   }
   // diverging: red below the midpoint, green above, stronger further out
   const mid = (min + max) / 2
