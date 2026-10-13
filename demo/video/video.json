@@ -1,0 +1,21 @@
+{
+  "raw": "~/spyglass-shots/video/raw",
+  "output": "~/spyglass-shots/video/spyglass-demo.mp4",
+  "title": "Ask your data. Get a report.",
+  "subtitle": "A semantic layer in Rust, running in your browser",
+  "end": "spyglass-dev.github.io/spyglass",
+  "end_subtitle": "Open source · Apache 2.0",
+  "music": {
+    "file": "~/projects/distri/heyzippy.io/carousels/media/audio/443454-dminor-90bpm-mp3.mp3",
+    "credit": "\"Dminor (90bpm)\" by Pax11, CC0, https://freesound.org/s/443454/"
+  },
+  "clips": [
+    { "from": "overview", "to": "filter", "caption": "A store report: two years of orders, generated in the browser tab" },
+    { "from": "filter", "to": "ask", "caption": "One filter narrows every widget on the report" },
+    { "from": "ask", "to": "working", "to_offset": 1.5, "caption": "Ask a question in plain words" },
+    { "from": "working", "from_offset": 1.5, "to": "building", "speed": 3, "caption": "The analyst explores the data first (3x speed)" },
+    { "from": "building", "to": "answer", "speed": 1.5, "caption": "Then builds the report, widget by widget" },
+    { "from": "answer", "to": "data", "caption": "And states the finding in two sentences" },
+    { "from": "data", "to": "end", "caption": "Nothing leaves the tab: DuckDB and the spyglass compiler, as WebAssembly" }
+  ]
+}
