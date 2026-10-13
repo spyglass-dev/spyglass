@@ -1,0 +1,21 @@
+[package]
+name = "spyglass-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "The spyglass compiler for the browser: compile a query to SQL, run it on any in-browser engine (DuckDB-WASM), assemble the result."
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+spyglass = { path = "..", default-features = false }
+wasm-bindgen = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
