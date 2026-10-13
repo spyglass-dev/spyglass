@@ -97,7 +97,8 @@ properties (`tokens` export): `--rpt-bg`, `--rpt-muted`, `--rpt-border`,
 `--rpt-text`, `--rpt-text-muted`, `--rpt-text-faint`, `--rpt-accent`,
 `--rpt-accent-soft`, `--rpt-positive`, `--rpt-negative`. Define any of them on
 an ancestor to restyle the whole widget set; with none defined the stock light
-theme renders. No CSS import, no Tailwind required.
+theme renders. There is no CSS to import, but layout uses Tailwind utility classes:
+add `node_modules/@spyglass/ui/dist/**/*.js` to your Tailwind `content`.
 
 ### Pivot: a missing cell is not a zero
 
