@@ -195,14 +195,18 @@ export function WidgetCard({ spec, children, actions, exporters = DEFAULT_WIDGET
           {controls}
         </div>
       ) : (
-        <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
-          {skipped && !hover && <AllTimeChip reason={skipped} />}
-          {controls}
-        </div>
+        <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2 }}>{controls}</div>
       )}
       <div ref={body} style={{ flex: 1, minWidth: 0, opacity: stale ? 0.55 : 1, transition: 'opacity 160ms' }}>
         {children}
       </div>
+      {/* A metric's marker sits under the value, where a comparison would:
+          in the corner it collided with any label longer than a word. */}
+      {metric && !title && skipped && (
+        <div style={{ marginTop: 6 }}>
+          <AllTimeChip reason={skipped} />
+        </div>
+      )}
     </div>
   )
 }
