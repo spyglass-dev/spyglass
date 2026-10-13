@@ -13,6 +13,10 @@ const CASES: [string, WidgetQuery][] = [
   ['records in Europe', { mode: 'rows', dimensions: ['Orders.id', 'Orders.customer_id', 'Orders.ordered_at', 'Orders.revenue_value'], filters: [{ member: 'Orders.region', operator: 'equals', values: ['Europe'] }], limit: 5 } as WidgetQuery],
   ['revenue by category x channel', { measures: ['OrderItems.revenue', 'OrderItems.margin'], dimensions: ['OrderItems.category', 'OrderItems.channel'], order: [{ member: 'OrderItems.revenue', desc: true }], limit: 8 }],
   ['top customers (labelled)', { measures: ['Orders.revenue'], dimensions: ['Orders.customer_id'], order: [{ member: 'Orders.revenue', desc: true }], limit: 5 }],
+  ['traffic under a report date range', { measures: ['Traffic.conversion_rate'], dimensions: ['Traffic.channel'], filters: [{ member: 'Traffic.day', operator: 'gte', values: [new Date(Date.now() - 30 * 864e5).toISOString()] }, { member: 'Traffic.day', operator: 'lt', values: [new Date().toISOString()] }] }],
+  ['traffic metric compare + range', { measures: ['Traffic.conversion_rate'], timeDimensions: [{ dimension: 'Traffic.day', dateRange: [new Date(Date.now() - 30 * 864e5).toISOString(), new Date().toISOString()], compare: 'previous_period' }] }],
+  ['traffic trend by day in range', { measures: ['Traffic.conversion_rate'], timeDimensions: [{ dimension: 'Traffic.day', granularity: 'day', dateRange: [new Date(Date.now() - 30 * 864e5).toISOString(), new Date().toISOString()] }], order: [{ member: 'Traffic.day' }] }],
+  ['orders under a report date range', { measures: ['Orders.revenue'], filters: [{ member: 'Orders.ordered_at', operator: 'gte', values: [new Date(Date.now() - 30 * 864e5).toISOString()] }, { member: 'Orders.ordered_at', operator: 'lt', values: [new Date().toISOString()] }] }],
   ['contains filter', { measures: ['OrderItems.units'], dimensions: ['OrderItems.product'], filters: [{ member: 'OrderItems.product', operator: 'contains', values: ['tent'] }] }],
 ]
 

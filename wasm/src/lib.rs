@@ -62,6 +62,9 @@ impl Spyglass {
     /// Load a model from cube YAML (the same files the server loads).
     #[wasm_bindgen(constructor)]
     pub fn new(cubes_yaml: &str) -> Result<Spyglass, JsError> {
+        // A panic surfaces as its message in the console, not a bare
+        // `unreachable` trap.
+        console_error_panic_hook::set_once();
         let model = spyglass::loader::parse_str(cubes_yaml, "cubes.yml").map_err(js_err)?;
         Ok(Spyglass {
             model,

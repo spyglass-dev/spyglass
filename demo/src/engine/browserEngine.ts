@@ -43,6 +43,8 @@ export interface BrowserEngineOptions {
   seedSql: string
   /** Rows a single query may return before it is marked truncated. */
   maxRows?: number
+  /** Boot progress, for a loading screen. */
+  onProgress?: (step: 'engine' | 'compiler' | 'data' | 'ready', ms: number) => void
 }
 
 /** Arrow hands back BigInt for 64-bit integers; JSON and the widgets want numbers. */
@@ -66,7 +68,23 @@ function bindable(params: Scalar[]): (string | null)[] {
   return params.map((p) => (p === null ? null : String(p)))
 }
 
+/**
+ * wasm-bindgen keeps ONE module instance in a global. Initializing twice —
+ * StrictMode runs effects twice — swaps that global under objects created by
+ * the first instance, and their calls then write into the other module's
+ * heap (it surfaced as a dlmalloc assertion several queries later). Once per
+ * page.
+ */
+let compilerReady: Promise<unknown> | null = null
+function initCompilerOnce(): Promise<unknown> {
+  compilerReady ??= initCompiler({ module_or_path: compilerWasm })
+  return compilerReady
+}
+
 export async function createBrowserEngine(opts: BrowserEngineOptions): Promise<BrowserEngine> {
+  const t0 = performance.now()
+  const step = (name: 'engine' | 'compiler' | 'data' | 'ready') => opts.onProgress?.(name, performance.now() - t0)
+  step('engine')
   const bundle = await duckdb.selectBundle({
     mvp: { mainModule: duckdbMvp, mainWorker: duckdbMvpWorker },
     eh: { mainModule: duckdbEh, mainWorker: duckdbEhWorker },
@@ -78,16 +96,28 @@ export async function createBrowserEngine(opts: BrowserEngineOptions): Promise<B
   // Buckets and relative dates resolve in UTC, matching the server's default.
   await conn.query(`set TimeZone = 'UTC'`).catch(() => undefined)
 
-  await initCompiler({ module_or_path: compilerWasm })
+  step('compiler')
+  await initCompilerOnce()
   const compiler = new Spyglass(opts.cubesYaml)
   const meta = JSON.parse(compiler.meta()) as CubeModelMeta
 
   // DuckDB's `query` runs one statement at a time from a multi-statement
   // script fine; the seed is a script.
+  step('data')
   await conn.query(opts.seedSql)
+  step('ready')
 
   let lastMs = 0
-  async function exec(stmt: Statement): Promise<Record<string, unknown>[]> {
+  // One statement at a time: the canvas resolves every widget at once, and a
+  // single DuckDB connection is not the place to interleave prepared
+  // statements.
+  let queue: Promise<unknown> = Promise.resolve()
+  function exec(stmt: Statement): Promise<Record<string, unknown>[]> {
+    const run = queue.then(() => execNow(stmt))
+    queue = run.catch(() => undefined)
+    return run
+  }
+  async function execNow(stmt: Statement): Promise<Record<string, unknown>[]> {
     const started = performance.now()
     try {
       if (stmt.params.length === 0) return toRows(await conn.query(stmt.sql))
@@ -105,9 +135,14 @@ export async function createBrowserEngine(opts: BrowserEngineOptions): Promise<B
   return {
     meta,
     async runQuery(query) {
-      const plan = JSON.parse(
-        compiler.plan(JSON.stringify(query), undefined, Date.now(), opts.maxRows ?? 5000),
-      ) as Plan
+      let planned: string
+      try {
+        planned = compiler.plan(JSON.stringify(query), undefined, Date.now(), opts.maxRows ?? 5000)
+      } catch (err) {
+        console.error('[spyglass] compile failed:', err instanceof Error ? err.message : err, JSON.stringify(query))
+        throw err
+      }
+      const plan = JSON.parse(planned) as Plan
       try {
         const rows = await exec(plan.main)
         const prev = plan.prev ? await exec(plan.prev) : undefined
@@ -116,6 +151,7 @@ export async function createBrowserEngine(opts: BrowserEngineOptions): Promise<B
         ) as QueryResultLite
       } catch (err) {
         compiler.discard(plan.id)
+        console.error('[spyglass] query failed:', err instanceof Error ? err.message : err, '\n', plan.main.sql, JSON.stringify(plan.main.params))
         throw err
       }
     },
@@ -124,7 +160,7 @@ export async function createBrowserEngine(opts: BrowserEngineOptions): Promise<B
       return (await exec(stmt)) as { value: Scalar; label?: string; count: number }[]
     },
     async sql(statement) {
-      return toRows(await conn.query(statement))
+      return exec({ sql: statement, params: [] })
     },
     lastQueryMs: () => lastMs,
   }

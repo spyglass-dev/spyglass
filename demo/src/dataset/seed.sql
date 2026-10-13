@@ -93,7 +93,7 @@ select row_number() over (order by day, i)::int as id,
   case
     when month(day) in (11, 12) and u_disc < 0.45 then 0.2
     when u_disc < 0.12 then 0.1 when u_disc < 0.18 then 0.15 else 0.0
-  end as discount
+  end::double as discount
 from raw;
 
 create or replace table order_items as

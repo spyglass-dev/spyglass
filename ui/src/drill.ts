@@ -35,7 +35,7 @@ export type DrillTrail = DrillEvent[]
 export function drillStepLabel(step: DrillEvent): string {
   const dim = step.member.split('.').pop() ?? step.member
   const name = dim.replace(/_id$/, '').replace(/_/g, ' ')
-  return `${name}: ${step.label ?? String(step.value)}`
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)}: ${step.label ?? String(step.value)}`
 }
 
 /**

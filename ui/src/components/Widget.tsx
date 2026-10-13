@@ -25,6 +25,7 @@ export function Widget({
   onDrill,
   onMeasureClick,
   onRefresh,
+  framed,
 }: {
   spec: WidgetSpec
   registry?: WidgetRegistry
@@ -41,21 +42,29 @@ export function Widget({
   onMeasureClick?: (row: Record<string, unknown>, columnKey: string) => void
   /** Re-resolve this widget's data (passed through to view components). */
   onRefresh?: () => void
+  /** Rendered inside a `WidgetCard` — inner widgets drop their own frame. */
+  framed?: boolean
 }) {
   switch (spec.type) {
     case 'metric':
       return <Metric spec={spec} />
     case 'table':
-      return <DataGrid spec={spec} onQuery={onGridQuery} onDrill={onDrill} onMeasureClick={onMeasureClick} />
+      return <DataGrid spec={spec} onQuery={onGridQuery} onDrill={onDrill} onMeasureClick={onMeasureClick} framed={framed} />
     case 'chart':
-      return <Chart spec={spec} />
+      return <Chart spec={spec} onDrill={onDrill} />
     case 'note':
       return <Note spec={spec} />
     case 'pivot':
       // Cells share the table's measure-click contract: the source row
       // carries both axis dimensions, so the records drawer narrows to the
       // exact cell (e.g. one student's answers on one activity).
-      return <Pivot spec={spec} onMeasureClick={onMeasureClick} />
+      // A wide pivot scrolls sideways inside its card instead of clipping
+      // the totals column.
+      return (
+        <div style={{ overflowX: 'auto' }}>
+          <Pivot spec={spec} onMeasureClick={onMeasureClick} />
+        </div>
+      )
     case 'view': {
       // An unmet contract or unknown component renders widget_error — NEVER
       // a blank cell.

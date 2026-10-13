@@ -8,7 +8,8 @@ import type { ReportDoc, WidgetSpec } from '../types'
 import { tokens } from '../tokens'
 import type { WidgetRegistry } from '../registry'
 import { Widget } from './Widget'
-import { AllTimeChip } from './AllTimeChip'
+import { WidgetCard } from './WidgetCard'
+import type { WidgetExporter } from '../exporters'
 
 const grid: CSSProperties = {
   display: 'grid',
@@ -24,9 +25,12 @@ function span(w?: number): CSSProperties {
 export function ReportView({
   doc,
   registry,
+  exporters,
 }: {
   doc: ReportDoc
   registry?: WidgetRegistry
+  /** Widget export menu entries (default CSV, PNG, JSON; `[]` hides it). */
+  exporters?: WidgetExporter[]
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -39,25 +43,13 @@ export function ReportView({
         </header>
       )}
       <div style={grid}>
-        {doc.widgets.map((spec: WidgetSpec, i) => {
-          const showTitle = spec.title && spec.type !== 'metric'
-          const skipped = spec.applied?.dateRangeSkipped
-          return (
-            <section key={spec.id ?? i} style={span(spec.w)}>
-              {(showTitle || skipped) && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  {showTitle && (
-                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: tokens.textMuted }}>
-                      {spec.title}
-                    </span>
-                  )}
-                  {skipped && <AllTimeChip reason={skipped} />}
-                </div>
-              )}
-              <Widget spec={spec} registry={registry} />
-            </section>
-          )
-        })}
+        {doc.widgets.map((spec: WidgetSpec, i) => (
+          <section key={spec.id ?? i} style={span(spec.w)}>
+            <WidgetCard spec={spec} exporters={exporters}>
+              <Widget spec={spec} registry={registry} framed />
+            </WidgetCard>
+          </section>
+        ))}
       </div>
     </div>
   )

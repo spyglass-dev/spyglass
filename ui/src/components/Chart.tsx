@@ -9,10 +9,11 @@
  * verbatim for charts the compact encoding can't express. The `ChartSpec`
  * contract and call sites are unchanged either way.
  */
-import { lazy, Suspense, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { VegaEmbedProps } from 'react-vega'
-import { parseTimestamp, type ChartSpec, type ValueFormat } from '../types'
+import { formatDateValue, formatValue, parseTimestamp, type ChartSpec, type ValueFormat } from '../types'
 import { tokens } from '../tokens'
+import type { DrillEvent } from '../drill'
 
 // Lazy-load react-vega (and Vega) so the heavy renderer is only fetched when a
 // chart actually renders — keeps it out of the host's initial bundle. react-vega
@@ -23,7 +24,56 @@ const VegaEmbed = lazy(() => import('react-vega').then((m) => ({ default: m.Vega
  *  the render boundary). */
 type VlSpec = Record<string, unknown>
 
-const EMBED_OPTIONS = { actions: false, renderer: 'svg', mode: 'vega-lite' } as const
+const EMBED_OPTIONS = {
+  actions: false,
+  renderer: 'svg',
+  mode: 'vega-lite',
+  // The tooltip is themed by TOOLTIP_CSS below (class `custom-theme`).
+  tooltip: { theme: 'custom' },
+} as const
+
+/**
+ * Vega's stock tooltip is a grey box of `field: value` pairs in a monospace
+ * font. This one reads like the rest of the widget set: the category as a
+ * heading, then each value with its name. Injected once per document.
+ */
+const TOOLTIP_CSS = `
+#vg-tooltip-element.vg-tooltip.custom-theme {
+  font: 12px/1.45 ui-sans-serif, system-ui, sans-serif;
+  color: var(--rpt-text, #374151);
+  background: var(--rpt-bg, #fff);
+  border: 1px solid var(--rpt-border, #e5e7eb);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px -6px rgba(15, 23, 42, 0.18);
+  padding: 8px 10px;
+  max-width: 280px;
+}
+#vg-tooltip-element.vg-tooltip.custom-theme table tr td.key {
+  color: var(--rpt-text-muted, #6b7280);
+  font-weight: 500;
+  padding-right: 10px;
+  text-align: left;
+}
+#vg-tooltip-element.vg-tooltip.custom-theme table tr td.value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+#vg-tooltip-element.vg-tooltip.custom-theme h2 {
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+`
+let tooltipStyled = false
+function ensureTooltipStyle() {
+  if (tooltipStyled || typeof document === 'undefined') return
+  const el = document.createElement('style')
+  el.setAttribute('data-spyglass-tooltip', '')
+  el.textContent = TOOLTIP_CSS
+  document.head.appendChild(el)
+  tooltipStyled = true
+}
 
 /** Categorical series palette — CVD-validated (lightness band, chroma floor,
  *  adjacent-pair separation; contrast relief comes from axis labels + the CSV
@@ -55,7 +105,7 @@ const CHART_CONFIG = {
     tickColor: '#e5e7eb',
     tickSize: 4,
   },
-  legend: { labelColor: '#6b7280', titleColor: '#6b7280', labelFontSize: 11, symbolSize: 80 },
+  legend: { labelColor: '#6b7280', titleColor: '#6b7280', labelFontSize: 11, symbolSize: 70, symbolType: 'circle', orient: 'top', direction: 'horizontal', columnPadding: 14 },
   bar: { color: CHART_SERIES[0], cornerRadiusTopLeft: 3, cornerRadiusTopRight: 3 },
   line: { color: CHART_SERIES[0], strokeWidth: 2 },
   area: { color: CHART_SERIES[0], opacity: 0.2, line: { color: CHART_SERIES[0], strokeWidth: 2 } },
@@ -113,9 +163,11 @@ function valueAxis(format?: ValueFormat): Record<string, unknown> {
     case 'percent':
       return { labelExpr: "datum.value + '%'" }
     case 'currency':
-      return { format: '$,.0f' }
+      // `$1.2M`, not `$1,200,000` — an axis label is read at a glance. d3's
+      // SI prefix writes zero as `$0k` and a billion as `G`; fix both.
+      return { labelExpr: "datum.value == 0 ? '$0' : replace(format(datum.value, '$.3~s'), 'G', 'B')" }
     case 'number':
-      return { format: ',.0f' }
+      return { labelExpr: "datum.value == 0 ? '0' : replace(format(datum.value, '.3~s'), 'G', 'B')" }
     default:
       return {}
   }
@@ -191,6 +243,28 @@ function inferTimeUnit(values: Record<string, unknown>[], field: string): string
   return 'year'
 }
 
+/**
+ * Is the LAST bucket still in progress? A week that started on Monday holds
+ * two days of orders on Wednesday, and drawn like the others it reads as a
+ * collapse. The bucket is in progress when its start plus one step (the
+ * series' own spacing) is still in the future.
+ */
+export function lastBucketInProgress(
+  values: Record<string, unknown>[],
+  field: string,
+  now: number = Date.now(),
+): unknown {
+  const ms = [...new Set(values.map((r) => parseTimestamp(String(r[field]))))]
+    .filter((n) => !Number.isNaN(n))
+    .sort((a, b) => a - b)
+  if (ms.length < 3) return undefined
+  let step = Infinity
+  for (let i = 1; i < ms.length; i++) step = Math.min(step, ms[i] - ms[i - 1])
+  const last = ms[ms.length - 1]
+  if (last + step <= now) return undefined
+  return values.find((r) => parseTimestamp(String(r[field])) === last)?.[field]
+}
+
 /** Escape dots in a field name so Vega-Lite treats it as a flat key, not a
  *  nested accessor. Our members look like `Submissions.submitted` but the row
  *  keys are flat, so an unescaped dot would look up `datum.Submissions.submitted`
@@ -208,8 +282,10 @@ const esc = (field: unknown) => String(field ?? '').replace(/\./g, '\\.')
  */
 /** A legend entry a reader can read: `Events.lessons_authored` is "Lessons
  *  authored", not the member name with its underscores showing. */
-function seriesLabel(member: string): string {
-  const field = member.split('.').pop() ?? member
+function seriesLabel(member: string | null | undefined): string {
+  // Agent-authored specs arrive with `y: null`; a label is not worth a crash.
+  const key = String(member ?? '')
+  const field = key.split('.').pop() ?? key
   const words = field.replace(/_/g, ' ').trim()
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
@@ -218,20 +294,86 @@ function foldSeries(
   values: Record<string, unknown>[],
   ys: string[],
   xField: string,
+  chart?: ChartSpec['chart'],
 ): { values: Record<string, unknown>[]; y: string; color: string } {
   const out: Record<string, unknown>[] = []
+  const label = `${xField}__label`
   for (const row of values) {
     for (const y of ys) {
-      out.push({ [xField]: row[xField], _series: seriesLabel(y), _value: row[y] })
+      out.push({
+        [xField]: row[xField],
+        ...(label in row ? { [label]: row[label] } : {}),
+        _series: chart ? titleOf(chart, y) : seriesLabel(y),
+        _value: row[y],
+        // Each measure keeps its own format through the fold.
+        __tt__value: tooltipValue(row[y], chart ? formatOf(chart, y) : undefined),
+      })
     }
   }
   return { values: out, y: '_value', color: '_series' }
 }
 
+// ── Tooltip + axis text ──────────────────────────────────────────────────────
+
+/** The display name of a field: the model's title, else the humanized key. */
+function titleOf(chart: ChartSpec['chart'], field: string): string {
+  return chart.titles?.[field] ?? chart.titles?.[field.replace(/__label$/, '')] ?? seriesLabel(field)
+}
+
+function formatOf(chart: ChartSpec['chart'], field: string): ValueFormat | undefined {
+  return chart.formats?.[field] ?? chart.format
+}
+
+/** Precise, never compact: the tooltip is where the exact figure lives. */
+function tooltipValue(v: unknown, format?: ValueFormat): string {
+  if (v === null || v === undefined || v === '') return '—'
+  if (typeof v === 'string' && isTimestamp(v)) return formatDateValue(v)
+  const n = typeof v === 'number' ? v : Number(v)
+  if (typeof v === 'string' && Number.isNaN(n)) return v
+  if (format === 'currency' || format === 'percent') return formatValue(n, format)
+  return Number.isInteger(n) ? n.toLocaleString() : (Math.round(n * 10) / 10).toLocaleString()
+}
+
+/** The field the x axis SHOWS: a labelled id draws its `__label`. */
+function displayField(values: Record<string, unknown>[], x: string): string {
+  const label = `${x}__label`
+  return values.length > 0 && values.every((r) => label in r) ? label : x
+}
+
+/**
+ * Stamp each row with the strings its tooltip shows. Vega's own formatting
+ * cannot append `%` without scaling, has no locale currency, and would print
+ * `589210.0000000038`; precomputing keeps the tooltip identical to the table.
+ */
+function withTooltipText(
+  values: Record<string, unknown>[],
+  fields: { field: string; format?: ValueFormat }[],
+): Record<string, unknown>[] {
+  return values.map((r) => {
+    const out: Record<string, unknown> = { ...r }
+    for (const { field, format } of fields) out[`__tt_${field}`] = tooltipValue(r[field], format)
+    return out
+  })
+}
+
+const tt = (field: string, title: string) => ({ field: esc(`__tt_${field}`), type: 'nominal', title })
+
 /** Compile a compact `ChartSpec.chart` into a Vega-Lite spec. */
 export function toVegaLiteForTest(chart: ChartSpec['chart']): VlSpec {
   return toVegaLite(chart)
 }
+
+/** `datum["Orders.region"]` — Vega expressions index dotted keys by string. */
+const datumRef = (field: string) => `datum[${JSON.stringify(field)}]`
+
+/** Fade everything but the highlighted categories (the drill selection). */
+function highlightOpacity(field: string, highlight: unknown[] | undefined): Record<string, unknown> | undefined {
+  if (!highlight?.length) return undefined
+  const set = JSON.stringify(highlight.map(String))
+  return { condition: { test: `indexof(${set}, '' + ${datumRef(field)}) >= 0`, value: 1 }, value: 0.28 }
+}
+
+const SCHEMA = 'https://vega.github.io/schema/vega-lite/v6.json'
 
 function toVegaLite(chart: ChartSpec['chart']): VlSpec {
   const { mark, x, stack, format } = chart
@@ -240,17 +382,47 @@ function toVegaLite(chart: ChartSpec['chart']): VlSpec {
   const hasX = Boolean(x)
   const xField = hasX ? (x as string) : '_i'
   let values = chart.series.map((r, i) => (hasX ? r : { ...r, _i: i + 1 }))
+  const xShow = hasX ? displayField(values, xField) : xField
+  const xTitle = hasX ? titleOf(chart, xField) : ''
 
+  let folded = false
   if (Array.isArray(y)) {
     if (y.length > 1) {
-      const folded = foldSeries(values, y, xField)
-      values = folded.values
-      y = folded.y
-      color = color ?? folded.color
+      const f = foldSeries(values, y, xField, chart)
+      values = f.values
+      y = f.y
+      color = color ?? f.color
+      folded = true
     } else {
       y = y[0] ?? ''
     }
   }
+  const yField = y as string
+  const yFormat = folded ? format : formatOf(chart, yField)
+  const yTitle = folded ? 'Value' : titleOf(chart, yField)
+  const colorTitle = color ? (folded ? 'Series' : titleOf(chart, color)) : ''
+  const prevKey = `__prev_${yField}`
+  const ghost =
+    !folded &&
+    chart.comparison !== false &&
+    (mark === 'line' || mark === 'area' || mark === 'bar') &&
+    values.some((r) => r[prevKey] !== undefined && r[prevKey] !== null)
+
+  values = withTooltipText(values, [
+    { field: xShow },
+    ...(folded ? [] : [{ field: yField, format: yFormat }]),
+    ...(color && !folded ? [{ field: color }] : []),
+    ...(chart.y2 ? [{ field: chart.y2, format: formatOf(chart, chart.y2) }] : []),
+    ...(ghost ? [{ field: prevKey, format: yFormat }] : []),
+  ])
+  const tooltip = [
+    tt(xShow, xTitle || 'Category'),
+    ...(color ? [tt(color, colorTitle)] : []),
+    tt(yField, yTitle),
+    ...(chart.y2 ? [tt(chart.y2, titleOf(chart, chart.y2))] : []),
+    ...(ghost ? [tt(prevKey, 'Previous period')] : []),
+  ]
+  const opacity = highlightOpacity(xField, chart.highlight)
 
   // ── Part-to-whole: a donut ────────────────────────────────────────────
   //
@@ -258,35 +430,35 @@ function toVegaLite(chart: ChartSpec['chart']): VlSpec {
   // chart, so this one is BOUNDED rather than trusted: slices past the sixth
   // fold into "Other", the categories keep the order the query returned them
   // in, and the tooltip carries the share so nobody has to estimate an angle.
-  // Inside those bounds — "what proportion of the work is grading" — it is the
-  // form that answers the question at a glance.
   if (mark === 'arc') {
-    const yField = typeof y === 'string' ? y : (y as string[])[0] ?? ''
-    const sliced = foldTail(values, xField, yField, MAX_SLICES)
+    const sliced = foldTail(values, xShow, yField, MAX_SLICES)
     const total = sliced.reduce((sum, r) => sum + (Number(r[yField]) || 0), 0) || 1
     return {
-      $schema: 'https://vega.github.io/schema/vega-lite/v6.json',
+      $schema: SCHEMA,
       data: {
-        values: sliced.map((r) => ({ ...r, _share: ((Number(r[yField]) || 0) / total) * 100 })),
+        values: sliced.map((r) => ({
+          ...r,
+          _share: ((Number(r[yField]) || 0) / total) * 100,
+          __tt__share: `${(Math.round(((Number(r[yField]) || 0) / total) * 1000) / 10).toFixed(1)}%`,
+          [`__tt_${xShow}`]: r[`__tt_${xShow}`] ?? String(r[xShow]),
+          [`__tt_${yField}`]: r[`__tt_${yField}`] ?? tooltipValue(r[yField], yFormat),
+        })),
       },
-      mark: { type: 'arc', innerRadius: 52, stroke: '#fff', strokeWidth: 2, tooltip: true },
+      mark: { type: 'arc', innerRadius: 58, padAngle: 0.012, cornerRadius: 3, stroke: 'var(--rpt-bg, #fff)', strokeWidth: 1, tooltip: true },
       encoding: {
         theta: { field: esc(yField), type: 'quantitative', stack: true },
         color: {
-          field: esc(xField),
+          field: esc(xShow),
           type: 'nominal',
           title: null,
           sort: null,
-          legend: { orient: 'right' },
+          legend: { orient: 'bottom', direction: 'horizontal', columns: 2, labelLimit: 120, symbolType: 'circle' },
         },
-        tooltip: [
-          { field: esc(xField), type: 'nominal', title: 'Category' },
-          { field: esc(yField), type: 'quantitative', title: 'Value', format: ',' },
-          { field: '_share', type: 'quantitative', title: 'Share', format: '.1f' },
-        ],
+        ...(opacity ? { opacity } : {}),
+        tooltip: [tt(xShow, xTitle || 'Category'), tt(yField, yTitle), tt('_share', 'Share')],
       },
       width: 'container',
-      height: 220,
+      height: chart.height ?? 240,
       autosize: { type: 'fit', contains: 'padding' },
       config: CHART_CONFIG,
     }
@@ -294,27 +466,27 @@ function toVegaLite(chart: ChartSpec['chart']): VlSpec {
 
   // ── Long category names: bars on their side ───────────────────────────
   //
-  // A vertical bar chart gives each label the width of one band, so
-  // `question_evaluated` and `Riverside Primary` come out ellipsised to
-  // `question_evalua…`. Horizontal bars give the label the whole left gutter
-  // and the plot grows downward, which is also the right shape for a ranking:
-  // you read the order down the page.
+  // A vertical bar chart gives each label the width of one band, so long
+  // names come out ellipsised. Horizontal bars give the label the whole left
+  // gutter and the plot grows downward, which is also the right shape for a
+  // ranking: you read the order down the page.
   if (mark === 'hbar') {
-    const yField = typeof y === 'string' ? y : (y as string[])[0] ?? ''
     return {
-      $schema: 'https://vega.github.io/schema/vega-lite/v6.json',
+      $schema: SCHEMA,
       data: { values },
       mark: { type: 'bar', tooltip: true, cornerRadiusTopRight: 3, cornerRadiusBottomRight: 3 },
       encoding: {
         y: {
-          field: esc(xField),
+          field: esc(xShow),
           type: 'nominal',
           title: null,
           sort: null,
-          axis: { labelLimit: 180 },
+          axis: { labelLimit: 180, domain: false, ticks: false, labelPadding: 6 },
         },
-        x: { field: esc(yField), type: 'quantitative', title: null, axis: valueAxis(format) },
+        x: { field: esc(yField), type: 'quantitative', title: null, axis: { ...valueAxis(yFormat), grid: true, tickCount: 4 } },
         ...(color ? { color: { field: esc(color), type: 'nominal', title: null } } : {}),
+        ...(opacity ? { opacity } : {}),
+        tooltip,
       },
       width: 'container',
       // One row per category rather than a fixed height: twenty rows squeezed
@@ -327,80 +499,241 @@ function toVegaLite(chart: ChartSpec['chart']): VlSpec {
 
   const vmark = mark === 'progress' ? 'bar' : mark
   const xt = xType(values, hasX ? xField : undefined, mark)
+  // The bucket in progress draws dashed (lines) or faded (bars), and says
+  // "so far" in its tooltip.
+  const partialX = xt === 'temporal' && chart.partial !== false ? lastBucketInProgress(values, xField) : undefined
+  if (partialX !== undefined) {
+    const xs = [...new Set(values.map((r) => String(r[xField])))].sort(
+      (a, b) => parseTimestamp(a) - parseTimestamp(b),
+    )
+    const prevX = xs[xs.length - 2]
+    values = values.map((r) => {
+      const at = String(r[xField])
+      const partial = at === String(partialX)
+      return {
+        ...r,
+        _partial: partial,
+        _tail: partial || at === prevX,
+        ...(partial ? { [`__tt_${xShow}`]: `${r[`__tt_${xShow}`] ?? at} (so far)` } : {}),
+      }
+    })
+  }
   // A bar needs a BAND to sit in. On a bare continuous time scale Vega draws
   // 1px hairlines, so a bar over time carries the bucket as a timeUnit —
   // inferred from the spacing of the data, since the widget does not say.
   const timeUnit = vmark === 'bar' && xt === 'temporal' ? inferTimeUnit(values, xField) : undefined
-  const encoding: Record<string, unknown> = {
-    x: {
-      field: esc(xField),
-      type: xt,
-      title: null,
-      ...(timeUnit ? { timeUnit } : {}),
-      // Straight, ellipsis-truncated category labels — never rotated text
-      // (the default -90° spin is the loudest "unstyled Vega" signal).
-      //
-      // `sort: null` means "the order the rows arrived in". Vega-Lite's
-      // default is ALPHABETICAL, which silently threw away the query's own
-      // `ORDER BY`: a histogram of engagement bands ordered never → 1 day →
-      // 2-4 → 5-14 → 15+ came out as `1 day · 15+ days · 2-4 days · 5-14
-      // days`, and a bar chart ordered by size came out in name order. The
-      // engine sorted the rows on purpose; the chart's job is to draw them.
-      ...(xt === 'nominal'
-        ? {
-            sort: null,
-            axis: { labelAngle: 0, labelLimit: 96, labelOverlap: 'parity' },
-            scale: { paddingInner: 0.35, paddingOuter: 0.15 },
-          }
-        : {}),
-      // A temporal axis with more ticks than room overlaps its labels into
-      // porridge ("Npr2026Way 2026" — two months drawn on top of each other).
-      ...(xt === 'temporal' ? { axis: { labelOverlap: 'greedy', labelAngle: 0 } } : {}),
-    },
-    y: { field: esc(y), type: 'quantitative', title: null, axis: valueAxis(format) },
+  const xEnc: Record<string, unknown> = {
+    field: esc(xt === 'nominal' ? xShow : xField),
+    type: xt,
+    title: null,
+    ...(timeUnit ? { timeUnit } : {}),
+    // Straight, ellipsis-truncated category labels — never rotated text
+    // (the default -90° spin is the loudest "unstyled Vega" signal).
+    //
+    // `sort: null` means "the order the rows arrived in". Vega-Lite's
+    // default is ALPHABETICAL, which silently threw away the query's own
+    // `ORDER BY`. The engine sorted the rows on purpose; the chart's job is
+    // to draw them.
+    ...(xt === 'nominal'
+      ? {
+          sort: null,
+          // Every category keeps its label, ellipsised to its band, rather than
+          // every other one being dropped.
+          axis: { labelAngle: 0, labelLimit: { expr: "max(bandwidth('x') + 8, 40)" }, labelOverlap: false, ticks: false },
+          scale: { paddingInner: 0.35, paddingOuter: 0.15 },
+        }
+      : {}),
+    // A temporal axis with more ticks than room overlaps its labels into
+    // porridge. Greedy overlap removal and flat labels keep it readable.
+    ...(xt === 'temporal' ? { axis: { labelOverlap: 'greedy', labelAngle: 0, grid: false, tickCount: 6 } } : {}),
+  }
+  const yEnc: Record<string, unknown> = {
+    field: esc(yField),
+    type: 'quantitative',
+    title: chart.y2 ? yTitle : null,
+    axis: { ...valueAxis(yFormat), tickCount: 5 },
+  }
+  const encoding: Record<string, unknown> = { x: xEnc, y: yEnc, tooltip }
+  if (opacity) encoding.opacity = opacity
+  else if (partialX !== undefined && vmark === 'bar') {
+    encoding.opacity = { condition: { test: 'datum._partial', value: 0.4 }, value: 1 }
   }
   if (color) {
     encoding.color = { field: esc(color), type: 'nominal', title: null }
     // Grouped bars: offset by the color field and don't stack.
     if (mark === 'bar' && stack === false) {
       encoding.xOffset = { field: esc(color) }
-      ;(encoding.y as Record<string, unknown>).stack = null
+      yEnc.stack = null
     } else if ((mark === 'bar' || mark === 'area') && stack === false) {
-      ;(encoding.y as Record<string, unknown>).stack = null
+      yEnc.stack = null
     }
   }
 
   // A couple of categories stretched across a full-width container become
   // slabs, so bar THICKNESS is capped — but the plot still takes the width of
-  // its container.
-  //
-  // Sizing the plot to the data instead (150px per category, capped at 640)
-  // was the earlier fix, and it silently cut data off: five bands in a
-  // half-width widget rendered a 640px SVG inside a 506px box, so the fifth
-  // bar and its label were drawn outside the frame. Every bar was in the DOM
-  // and the reader could only see four. A chart must never be wider than the
-  // thing it is drawn in.
+  // its container. A chart must never be wider than the thing it is drawn in.
   const slabRisk = vmark === 'bar' && xt === 'nominal' && !color && values.length <= 6
+  const trend = vmark === 'line' || vmark === 'area'
+  const markDef: Record<string, unknown> = {
+    type: vmark,
+    tooltip: true,
+    ...(slabRisk ? { size: 88 } : {}),
+    ...(mark === 'point' ? { filled: true } : {}),
+    ...(trend ? { interpolate: 'monotone' } : {}),
+    // Points on a short line make each value a target; on a long one they are noise.
+    ...(vmark === 'line' && values.length <= 31 ? { point: { filled: true, size: 26 } } : {}),
+    // A single-series area fades to nothing at the baseline instead of
+    // sitting there as a flat slab of color.
+    ...(vmark === 'area' && !color
+      ? {
+          line: { color: CHART_SERIES[0], strokeWidth: 2 },
+          color: {
+            x1: 1, y1: 1, x2: 1, y2: 0,
+            gradient: 'linear',
+            stops: [
+              { offset: 0, color: 'rgba(42, 120, 214, 0.02)' },
+              { offset: 1, color: 'rgba(42, 120, 214, 0.32)' },
+            ],
+          },
+          opacity: 1,
+        }
+      : {}),
+  }
+
+  const height = chart.height ?? 240
+  const dashedTail = partialX !== undefined && trend
+  const layered = ghost || Boolean(chart.y2) || Boolean(chart.target) || dashedTail
+  if (!layered) {
+    return {
+      $schema: SCHEMA,
+      data: { values },
+      mark: markDef,
+      encoding,
+      width: 'container',
+      height,
+      autosize: { type: 'fit', contains: 'padding' },
+      config: CHART_CONFIG,
+    }
+  }
+
+  // ── Layers: previous period, a second measure, a target ───────────────
+  const mainEncoding = { ...encoding }
+  delete mainEncoding.x
+  const notPartial = { filter: '!datum._partial' }
+  const layer: Record<string, unknown>[] = [
+    { ...(dashedTail ? { transform: [notPartial] } : {}), mark: markDef, encoding: mainEncoding },
+  ]
+  if (dashedTail) {
+    // The last two points, dashed: the trend continues, but the number at
+    // the end is not final.
+    layer.push({
+      transform: [{ filter: 'datum._tail' }],
+      mark: {
+        type: 'line',
+        strokeDash: [3, 3],
+        strokeWidth: 2,
+        interpolate: 'monotone',
+        tooltip: true,
+        ...(color ? {} : { color: CHART_SERIES[0] }),
+        point: { filled: true, size: 26, ...(color ? {} : { color: CHART_SERIES[0] }) },
+      },
+      encoding: {
+        y: { field: esc(yField), type: 'quantitative' },
+        ...(color ? { color: { field: esc(color), type: 'nominal', title: null } } : {}),
+        tooltip,
+      },
+    })
+  }
+  // A line over bars sits at the CENTRE of each band, not its left edge.
+  const overBand = timeUnit ? { x: { ...xEnc, bandPosition: 0.5 } } : {}
+  if (ghost) {
+    layer.push({
+      ...(partialX !== undefined ? { transform: [notPartial] } : {}),
+      mark: { type: 'line', strokeDash: [4, 3], strokeWidth: 1.5, color: '#9ca3af', interpolate: 'monotone', tooltip: true },
+      encoding: { ...overBand, y: { field: esc(prevKey), type: 'quantitative' }, tooltip },
+    })
+  }
+  if (chart.y2) {
+    layer.push({
+      mark: { type: 'line', color: CHART_SERIES[1], strokeWidth: 2, interpolate: 'monotone', point: { filled: true, size: 28, color: CHART_SERIES[1] }, tooltip: true },
+      encoding: {
+        ...overBand,
+        y: {
+          field: esc(chart.y2),
+          type: 'quantitative',
+          title: titleOf(chart, chart.y2),
+          axis: { ...valueAxis(formatOf(chart, chart.y2)), orient: 'right', grid: false, tickCount: 5, titleColor: CHART_SERIES[1] },
+        },
+        tooltip,
+      },
+    })
+  }
+  if (chart.target) {
+    const { value, label } = chart.target
+    layer.push({ mark: { type: 'rule', strokeDash: [5, 4], strokeWidth: 1.25, color: '#6b7280' }, encoding: { y: { datum: value } } })
+    layer.push({
+      mark: { type: 'text', align: 'right', baseline: 'bottom', dy: -4, fontSize: 11, fontWeight: 600, color: '#6b7280' },
+      encoding: {
+        y: { datum: value },
+        x: { value: 'width' },
+        text: { value: `${label ?? 'Target'} · ${tooltipValue(value, yFormat)}` },
+      },
+    })
+  }
   return {
-    $schema: 'https://vega.github.io/schema/vega-lite/v6.json',
+    $schema: SCHEMA,
     data: { values },
-    mark: {
-      type: vmark,
-      tooltip: true,
-      ...(slabRisk ? { size: 88 } : {}),
-      ...(mark === 'point' ? { filled: true } : {}),
-    },
-    encoding,
+    encoding: { x: xEnc },
+    layer,
+    ...(chart.y2 ? { resolve: { scale: { y: 'independent' } } } : {}),
     width: 'container',
-    height: 220,
+    height,
     autosize: { type: 'fit', contains: 'padding' },
     config: CHART_CONFIG,
   }
 }
 
-export function Chart({ spec }: { spec: ChartSpec }) {
+/** The DrillEvent for a clicked mark, or null when the mark is not a category
+ *  (a point in time, the "Other" slice, a reference line). */
+function drillFor(chart: ChartSpec['chart'], datum: Record<string, unknown> | undefined): DrillEvent | null {
+  const x = chart.x
+  if (!datum || !x || !x.includes('.')) return null
+  const value = datum[x]
+  if (value === undefined || value === null || value === 'Other') return null
+  if (typeof value === 'string' && isTimestamp(value)) return null
+  const member = x.replace(/__label$/, '')
+  const label = datum[`${member}__label`]
+  return {
+    member,
+    value: value as DrillEvent['value'],
+    ...(label !== undefined ? { label: String(label) } : {}),
+    ...(chart.entities?.[member] ? { entity: chart.entities[member] } : {}),
+  }
+}
+
+export function Chart({ spec, onDrill }: { spec: ChartSpec; onDrill?: (event: DrillEvent) => void }) {
   const { mark, x, y, series, max, vlSpec } = spec.chart
   const { ref, config } = useChartConfig()
+  useLayoutEffect(ensureTooltipStyle, [])
+
+  // Click a bar / slice / point to drill into that category. The handler is
+  // read through a ref so a new callback does not re-embed the chart.
+  const drillRef = useRef(onDrill)
+  drillRef.current = onDrill
+  const chartRef = useRef(spec.chart)
+  chartRef.current = spec.chart
+  const drillable = Boolean(onDrill) && Boolean(x?.includes('.')) && mark !== 'line' && mark !== 'area'
+  const onEmbed = useCallback(
+    (result: { view: { addEventListener: (type: string, cb: (e: unknown, item: unknown) => void) => void } }) => {
+      if (!drillable) return
+      result.view.addEventListener('click', (_e, item) => {
+        const datum = (item as { datum?: Record<string, unknown> } | null)?.datum
+        const event = drillFor(chartRef.current, datum)
+        if (event) drillRef.current?.(event)
+      })
+    },
+    [drillable],
+  )
 
   // Raw Vega-Lite escape hatch — render verbatim, injecting series as the
   // default dataset when the spec doesn't carry its own data.
@@ -456,14 +789,32 @@ export function Chart({ spec }: { spec: ChartSpec }) {
     )
   }
 
+  const yKey = Array.isArray(y) ? (y.length === 1 ? y[0] : undefined) : y
+  const ghost =
+    spec.chart.comparison !== false &&
+    !!yKey &&
+    (mark === 'line' || mark === 'area' || mark === 'bar') &&
+    series.some((r) => r[`__prev_${yKey}`] != null)
+
   return (
-    <div ref={ref} style={{ width: '100%' }}>
+    <div ref={ref} style={{ width: '100%', cursor: drillable ? 'pointer' : undefined }}>
+      {ghost && (
+        <div style={{ display: 'flex', gap: 14, fontSize: 11, color: tokens.textMuted, marginBottom: 2 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 14, height: 2, borderRadius: 2, background: CHART_SERIES[0] }} /> This period
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 14, borderTop: '2px dashed #9ca3af' }} /> Previous period
+          </span>
+        </div>
+      )}
       {compiled && (
-        <Suspense fallback={null}>
+        <Suspense fallback={<div style={{ height: spec.chart.height ?? 240 }} />}>
           <VegaEmbed
             spec={{ ...compiled, config } as VegaEmbedProps['spec']}
             options={EMBED_OPTIONS}
             onError={() => {}}
+            onEmbed={onEmbed as VegaEmbedProps['onEmbed']}
             style={{ width: '100%' }}
           />
         </Suspense>

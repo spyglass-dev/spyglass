@@ -23,7 +23,9 @@ function rowsOf(spec: WidgetSpec): number | null {
     case 'chart':
       return (spec.chart?.series ?? []).length
     case 'pivot':
-      return (spec as { rows?: unknown[] }).rows?.length ?? null
+      // `spec.rows` is the list of row DIMENSIONS (one key), not data — the
+      // data is `spec.data`. Reading `rows` made every pivot look non-empty.
+      return (spec.data ?? []).length
     case 'metric':
       // A metric of 0 is a real answer, not an absent one; only a missing
       // value means the query gave nothing back.
@@ -52,6 +54,7 @@ function sampleOf(spec: WidgetSpec): Record<string, unknown>[] | undefined {
   if (spec.type === 'table') return (spec.rows ?? []).slice(0, SAMPLE)
   if (spec.type === 'chart') return (spec.chart?.series ?? []).slice(0, SAMPLE)
   if (spec.type === 'metric') return [{ value: spec.value, label: spec.label }]
+  if (spec.type === 'pivot') return (spec.data ?? []).slice(0, SAMPLE)
   return undefined
 }
 

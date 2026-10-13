@@ -12,6 +12,9 @@ import type { ReportDoc, TableSpec, WidgetSpec } from '../types'
 import type { WidgetRegistry } from '../registry'
 import { Widget } from './Widget'
 import { WidgetBoundary } from './WidgetBoundary'
+import { WidgetCard } from './WidgetCard'
+import type { MemberIndex } from '../members'
+import type { WidgetExporter } from '../exporters'
 import { DataGrid, type GridQueryDelta } from './DataGrid'
 import { routeDrill, type DrillEvent, type DrillRouter } from '../drill'
 import type { ViewRegistry } from '../views'
@@ -22,9 +25,9 @@ import { parseReportSearch, reportStateToSearch, type GridUrlState } from '../ur
 import { FilterBar } from './FilterBar'
 import { ReportLoading } from './ReportLoading'
 import { WidgetError } from './WidgetError'
-import { AllTimeChip } from './AllTimeChip'
 import { DEFAULT_REPORT_FILTERS, type FilterFacet, type ReportFilters } from '../filters'
 import {
+  resolveBound,
   resolveReport,
   rowsQueryFor,
   type BoundWidget,
@@ -72,6 +75,10 @@ export interface ReportCanvasProps {
    *  reproduces the exact view. Off by default (hosts with their own
    *  routing wire `parseReportSearch`/`reportStateToSearch` themselves). */
   syncUrl?: boolean
+  /** The model's titles/formats/descriptions (`memberIndex(meta)`). */
+  members?: MemberIndex
+  /** Widget export menu entries (default CSV, PNG, JSON; `[]` hides it). */
+  exporters?: WidgetExporter[]
 }
 
 function InsertBar({ onClick }: { onClick?: () => void }) {
@@ -106,6 +113,8 @@ export function ReportCanvas({
   generating,
   drillRouter,
   syncUrl,
+  members,
+  exporters,
 }: ReportCanvasProps) {
   const [resolved, setResolved] = useState<ReportDoc | null>(null)
   const [loading, setLoading] = useState(true)
@@ -170,7 +179,7 @@ export function ReportCanvas({
     let cancelled = false
     setLoading(true)
     setError(null)
-    resolveReport(report, { runQuery, cubeCaps, views, filters, humanizeError })
+    resolveReport(report, { runQuery, cubeCaps, views, filters, humanizeError, members })
       .then((r) => {
         if (cancelled) return
         setResolved(r)
@@ -227,7 +236,7 @@ export function ReportCanvas({
     try {
       const query = rowsQueryFor(bound, row, { filters, drill: report.drill, cubeCaps })
       const result = await runQuery(query, { studentId: bound.studentId })
-      setDrawer({ title, spec: draftToWidgetSpec({ as: 'table', query }, result) as TableSpec })
+      setDrawer({ title, spec: draftToWidgetSpec({ as: 'table', query }, result, members) as TableSpec })
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e)
       setDrawer({ title, error: humanizeError?.(detail) ?? detail })
@@ -258,13 +267,15 @@ export function ReportCanvas({
       )}
 
       <div className="flex flex-col gap-3 p-1 pt-3">
-        <div className="flex items-center justify-end">
+        <div className="-mb-1 -mt-2 flex h-5 items-center justify-end">
           <button
             type="button"
             onClick={refresh}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+            aria-label="Refresh"
+            title="Refresh"
+            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+            <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} /> {loading ? 'Updating' : 'Refresh'}
           </button>
         </div>
 
@@ -281,9 +292,19 @@ export function ReportCanvas({
         )}
 
         {loading && !resolved ? (
-          <ReportLoading message="Loading report…" />
+          <div className="grid grid-cols-4 gap-4" aria-busy="true" aria-label="Loading report">
+            {report.widgets.map((w, i) => (
+              <div
+                key={i}
+                style={span((w as { w?: number }).w ?? ((w as BoundWidget).as === 'metric' ? 1 : 4))}
+                className={`animate-pulse rounded-xl border border-border bg-muted/40 ${(w as BoundWidget).as === 'metric' ? 'h-28' : 'h-72'}`}
+              />
+            ))}
+          </div>
         ) : (
-          <div className="grid grid-cols-4 gap-4">
+          // `dense` packs a narrow widget into the hole a wide one left, so an
+          // agent's widths never leave a gap in the middle of the report.
+          <div className="grid grid-cols-4 gap-4" style={{ gridAutoFlow: 'row dense' }}>
             <InsertBar onClick={onAddWidget} />
             {widgets.map((spec: WidgetSpec, i) => {
               const source = report.widgets[i]
@@ -291,43 +312,47 @@ export function ReportCanvas({
               // too — a report's prose (a summary, a teacher's note) is
               // authored content, not derived data.
               const editable = onEditWidget && (source?.type === 'bound' || source?.type === 'note')
-              const showTitle = spec.title && spec.type !== 'metric'
-              const skipped = spec.applied?.dateRangeSkipped
-              return (
-                <section key={spec.id ?? i} style={span(spec.w)} className="group/w relative">
-                  {(showTitle || skipped) && (
-                    <div className="mb-1.5 flex items-center gap-2">
-                      {showTitle && (
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{spec.title}</span>
-                      )}
-                      {skipped && <AllTimeChip reason={skipped} />}
-                    </div>
-                  )}
-                  {/* One widget with a shape nothing validated must not
-                      unmount the report. A two-measure line chart did exactly
-                      that and left a white screen. */}
-                  <WidgetBoundary title={(spec as { title?: string }).title}>
-                    <Widget
-                      spec={spec}
-                      registry={mergedRegistry}
-                      views={views}
-                      filters={filters}
-                      onGridQuery={source?.type === 'bound' ? gridQueryAt(i) : undefined}
-                      onDrill={source?.type === 'bound' || source?.type === 'view' ? onDrill : undefined}
-                      onMeasureClick={source?.type === 'bound' ? measureClickAt(i) : undefined}
-                      onRefresh={refresh}
-                    />
-                  </WidgetBoundary>
-                  <div className="absolute right-1 top-1 flex gap-1 opacity-0 transition-opacity group-hover/w:opacity-100">
-                    {editable && (
-                      <button type="button" onClick={() => onEditWidget!(source, i)} aria-label="Edit widget" className="flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:border-primary hover:text-primary">
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                    <button type="button" onClick={() => removeAt(i)} aria-label="Remove widget" className="flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:border-rose-300 hover:text-rose-600">
-                      <Trash2 className="h-3.5 w-3.5" />
+              const bound = source?.type === 'bound' ? (source as BoundWidget) : undefined
+              // Exports take the WHOLE result, not the loaded page.
+              const fetchAll = bound
+                ? () =>
+                    resolveBound(
+                      { ...bound, query: { ...bound.query, limit: 5000, offset: undefined } },
+                      { runQuery, cubeCaps, filters, drill: report.drill, members },
+                    )
+                : undefined
+              const actions = (
+                <>
+                  {editable && (
+                    <button type="button" onClick={() => onEditWidget!(source, i)} aria-label="Edit widget" className="flex h-[26px] w-[26px] items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+                      <Pencil className="h-3.5 w-3.5" />
                     </button>
-                  </div>
+                  )}
+                  <button type="button" onClick={() => removeAt(i)} aria-label="Remove widget" className="flex h-[26px] w-[26px] items-center justify-center rounded-md text-muted-foreground hover:bg-rose-50 hover:text-rose-600">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </>
+              )
+              return (
+                <section key={spec.id ?? i} style={span(spec.w)} className="relative">
+                  <WidgetCard spec={spec} actions={actions} exporters={exporters} fetchAll={fetchAll} stale={loading}>
+                    {/* One widget with a shape nothing validated must not
+                        unmount the report. A two-measure line chart did exactly
+                        that and left a white screen. */}
+                    <WidgetBoundary title={(spec as { title?: string }).title}>
+                      <Widget
+                        spec={spec}
+                        registry={mergedRegistry}
+                        views={views}
+                        filters={filters}
+                        framed
+                        onGridQuery={source?.type === 'bound' ? gridQueryAt(i) : undefined}
+                        onDrill={source?.type === 'bound' || source?.type === 'view' ? onDrill : undefined}
+                        onMeasureClick={source?.type === 'bound' ? measureClickAt(i) : undefined}
+                        onRefresh={refresh}
+                      />
+                    </WidgetBoundary>
+                  </WidgetCard>
                 </section>
               )
             })}
@@ -341,7 +366,7 @@ export function ReportCanvas({
 
         {generating && (
           <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-primary">
-            <Sparkles className="h-4 w-4 animate-pulse" /> Building your widget…
+            <Sparkles className="h-4 w-4 animate-pulse" /> The analyst is updating this report…
           </div>
         )}
       </div>

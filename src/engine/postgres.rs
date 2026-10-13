@@ -188,7 +188,9 @@ impl PostgresEngine {
             serde_json::to_string(&(
                 &plan.main.sql,
                 &plan.main.params,
-                plan.prev.as_ref().map(|p| (&p.compiled.sql, &p.compiled.params)),
+                plan.prev
+                    .as_ref()
+                    .map(|p| (&p.compiled.sql, &p.compiled.params)),
                 &ctx.scope,
                 ctx.allow_unscoped,
             ))

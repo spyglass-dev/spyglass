@@ -123,9 +123,7 @@ pub fn assemble_run(
     let has_more = total
         .map(|t| (query.offset.unwrap_or(0) as u64 + rows.len() as u64) < t)
         .unwrap_or(false);
-    let truncated_at = plan
-        .clamped_to
-        .filter(|max| rows.len() as u32 == *max);
+    let truncated_at = plan.clamped_to.filter(|max| rows.len() as u32 == *max);
 
     let mut result = QueryResult {
         columns,
