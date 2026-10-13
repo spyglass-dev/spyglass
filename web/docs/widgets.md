@@ -15,9 +15,9 @@ one serializable document the agent emits, the host stores, and the UI renders.
 
 | Type | Renders |
 |------|---------|
-| `metric` | a single headline number |
+| `metric` | a headline number, with change, sparkline and target when asked |
 | `table` | `DataGrid`: server-driven sort/paging, CSV, virtualization |
-| `chart` | a `bar` / `line` / `area` / `progress` mark |
+| `chart` | a `bar` / `hbar` / `line` / `area` / `arc` / `progress` mark, with optional `y2`, `target` and comparison series |
 | `note` | markdown narrative — the base renderer covers headings, `**bold**`, `*italic*`/`_italic_` and `` `code` `` without dependencies; register a `note` custom widget for full markdown |
 | `pivot` | rows × columns × one measure, from a flat group-by result |
 | `custom` | a host-registered component with frozen data |
@@ -93,11 +93,27 @@ per-report wiring.
 ### Theming: one token layer
 
 Every color the widgets paint routes through `var(--rpt-*, fallback)` custom
-properties (`tokens` export): `--rpt-bg`, `--rpt-muted`, `--rpt-border`,
-`--rpt-text`, `--rpt-text-muted`, `--rpt-text-faint`, `--rpt-accent`,
-`--rpt-accent-soft`, `--rpt-positive`, `--rpt-negative`. Define any of them on
-an ancestor to restyle the whole widget set; with none defined the stock light
-theme renders. There is no CSS to import, but layout uses Tailwind utility classes:
+properties (the `tokens` export). Define any of them on an ancestor to restyle
+the whole widget set; with none defined, the stock light theme renders.
+
+| Token | Paints |
+|---|---|
+| `--rpt-bg` | widget card surface (default white) |
+| `--rpt-muted` | table headers, total rows |
+| `--rpt-border` | hairlines and card borders |
+| `--rpt-card-shadow` | card shadow |
+| `--rpt-text`, `--rpt-text-strong`, `--rpt-text-muted`, `--rpt-text-faint` | body, titles, labels, placeholders |
+| `--rpt-accent`, `--rpt-accent-soft` | interactive affordances, in-cell bars, hover |
+| `--rpt-positive`, `--rpt-positive-soft`, `--rpt-negative`, `--rpt-negative-soft` | change pills |
+| `--rpt-chart-series` | comma-separated series colours (default: the CVD-validated palette) |
+| `--rpt-chart-axis-text`, `--rpt-chart-grid`, `--rpt-chart-domain` | axis labels, gridlines, axis lines |
+| `--rpt-warn-text`, `--rpt-warn-bg`, `--rpt-warn-border` | the unreachable-scope marker |
+
+Point them at your design system's variables (`--rpt-bg: hsl(var(--card))`)
+and charts, cards and pills follow your light and dark themes. Inputs, popovers
+and menus (filter bar, date picker, query builder) use your Tailwind `bg-card`,
+`border-border` and `text-foreground` classes, so they match the host's
+surfaces. There is no CSS to import, but layout uses Tailwind utility classes:
 add `node_modules/@spyglassjs/ui/dist/**/*.js` to your Tailwind `content`.
 
 ### Pivot: a missing cell is not a zero
@@ -159,6 +175,71 @@ categorical palette (`CHART_SERIES`) assigned in fixed order. A raw `vlSpec`
 carrying its own `config` overrides the theme wholesale. Table and metric
 headers derive from `humanizeMember` — `Cube.activity_id` renders as
 "Activity" (ids defer to their `label:` companions for values).
+
+### Cards, metrics and charts
+
+Every widget renders inside a **`WidgetCard`**: a white card with the title,
+an optional description, and an export menu that appears on hover. While a
+widget refetches, it keeps its last result at reduced opacity instead of
+flashing a spinner.
+
+A bound metric takes three options beyond its query:
+
+```json
+{
+  "type": "bound", "as": "metric", "label": "Return rate", "w": 1,
+  "query": { "measures": ["Orders.return_rate"] },
+  "filters": { "compare": "previous_period" },
+  "trend": true,
+  "upIsGood": false
+}
+```
+
+- `filters.compare` (`previous_period` or `previous_year`) adds the change
+  under the number: a percentage for amounts, points (`pt`) for rates.
+- `trend: true` draws a sparkline of the measure across the report's window.
+- `upIsGood: false` colours a rise red, for return rate, cost and churn.
+- `target: { value, label }` turns the tile into a goal meter.
+
+A bound chart takes:
+
+- `y2`: a second measure drawn as a line on a right-hand axis (revenue bars
+  with a margin line).
+- `target: { value, label }`: a horizontal reference line.
+- `height`: plot height in px (default 240; horizontal bars size by row).
+- `filters: { compare: "previous_year" }` on a time series: last year as a
+  dashed ghost series.
+
+An unfinished last period (this week, when the week is half over) is drawn as
+a dotted segment, not as a drop. Clicking a category drills the rest of the
+report (see Drill below), and the clicked category stays highlighted.
+
+Titles, formats and descriptions come from the model. Pass `meta` through
+`memberIndex(meta)` (or the `useReportMembers` hook) and widgets pick up
+`title`, `format` and `description` for every member, so the JSON only states
+what differs.
+
+### Exporters: a registry, not a menu
+
+Exports are plain objects a host can add to, replace or drop. A
+`WidgetExporter` is `{ id, label, applies(spec), run(ctx) }`, and the card
+lists every exporter whose `applies` says yes. A `ReportExporter` is
+`{ id, label, run({ doc, title }) }` for a whole report.
+
+| Built in | Does |
+|---|---|
+| `csvExporter` | the widget's full result as CSV, re-running the query for every page when the host passes `fetchAll` |
+| `pngExporter` | a chart as a 2× PNG on the widget's background |
+| `jsonExporter` | copies the resolved widget spec |
+| `markdownReportExporter` | the report as Markdown: metrics as a list, grids as tables |
+| `jsonReportExporter` | the resolved report doc |
+
+```tsx
+import { ReportView, DEFAULT_WIDGET_EXPORTERS, type WidgetExporter } from '@spyglassjs/ui'
+
+const pdf: WidgetExporter = { id: 'pdf', label: 'Download PDF', applies: () => true, run: myPdfPipeline }
+<ReportView doc={doc} exporters={[...DEFAULT_WIDGET_EXPORTERS, pdf]} />
+```
 
 ## Report doc
 
@@ -227,11 +308,17 @@ range could not reach, instead of presenting mixed windows as one report.
 
 Both frames (`ReportView` and `ReportCanvas`) render the receipt: any widget
 whose resolved spec carries `applied.dateRangeSkipped` gets an **`AllTimeChip`**
-in its title row (title-less metrics get a marker row of their own). The chip
-reads **"All time"** for `no_time_field` / `opted_out` / `unknown_cube` and
-**"Pinned range"** for `widget_pinned`, with the precise reason in the tooltip
-and a `data-reason` attribute for tests. Styling comes from three tokens:
-`--rpt-warn-text`, `--rpt-warn-bg`, `--rpt-warn-border`.
+in its title row. On a metric it sits under the value, where the comparison
+would go, so it never covers the label. The chip reads **"All time"** for
+`no_time_field` / `opted_out` / `unknown_cube` and **"Pinned range"** for
+`widget_pinned`, with the precise reason in the tooltip and a `data-reason`
+attribute for tests.
+
+The two kinds look different on purpose. A deliberate opt-out (`opted_out`)
+renders as quiet muted text with a clock, because on a row of lifetime totals
+an amber pill on every tile hides the one that matters. A skip nobody asked
+for (`no_time_field`, `unknown_cube`, `widget_pinned`) keeps the amber pill,
+styled by `--rpt-warn-text`, `--rpt-warn-bg` and `--rpt-warn-border`.
 
 Two practices keep the marker meaningful:
 
