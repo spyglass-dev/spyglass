@@ -72,6 +72,10 @@ widgets — `metric`, `table`, `chart`, `note` — and a **custom-component
 registry**. It's presentational and dependency-light, so it drops into any React
 app:
 
+```bash
+pnpm add @spyglassjs/ui     # peers: react, react-dom, lucide-react
+```
+
 ```tsx
 import { ReportView, type ReportDoc, type WidgetRegistry } from '@spyglassjs/ui'
 

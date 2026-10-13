@@ -32,6 +32,11 @@ store dataset generated inside the browser tab. Ask "which channels convert
 best?", the analyst builds the report, click a bar to drill, ask a follow-up
 about the slice you drilled into, save it, export it.
 
+![The analyst built "Conversion by channel and device" from one question](./web/static/img/demo/05-analyst-report.png)
+
+A one-minute video and the full walkthrough are on the
+[docs site](https://spyglass-dev.github.io/spyglass/demo).
+
 There is no server. The spyglass compiler runs as WebAssembly
 ([`wasm/`](./wasm)) and DuckDB-WASM executes the SQL it produces, so the demo
 runs the same query plan and result assembly as the Postgres engine.
@@ -224,7 +229,8 @@ See [web/docs/architecture.md](./web/docs/architecture.md) for the component map
 ## Documentation site
 
 The documentation lives in [`web/docs/`](./web/docs) as Markdown (readable here
-on GitHub) and is published as a Docusaurus site from [`web/`](./web). The
+on GitHub) and is published at **https://spyglass-dev.github.io/spyglass/** as a
+Docusaurus site from [`web/`](./web). The
 [`.github/workflows/docs.yml`](./.github/workflows/docs.yml) workflow builds and
 deploys it to GitHub Pages on every push to `main`.
 
