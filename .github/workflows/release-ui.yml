@@ -1,13 +1,19 @@
 name: Release @spyglassjs/ui
 
 # Push a tag `ui-v<version>` matching ui/package.json to publish that version to npm.
+#
+# Auth is npm trusted publishing (OIDC): npm trusts this workflow file in this
+# repo, so there is no NPM_TOKEN to create or rotate. One-time setup on
+# npmjs.com → @spyglassjs/ui → Settings → Trusted publishing → GitHub Actions:
+# owner `spyglass-dev`, repository `spyglass`, workflow `release-ui.yml`.
 on:
   push:
     tags: ['ui-v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
-  id-token: write # npm provenance
+  id-token: write # OIDC for trusted publishing; also signs provenance
 
 jobs:
   publish:
@@ -21,23 +27,43 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm >= 11.5.1.
+      - name: Update npm
+        run: npm install -g npm@latest && npm --version
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Tag matches package version
+        if: github.event_name == 'push'
         run: |
           version="$(node -p "require('./ui/package.json').version")"
           test "ui-v${version}" = "${GITHUB_REF_NAME}" || {
             echo "tag ${GITHUB_REF_NAME} != ui/package.json version ${version}"; exit 1; }
 
-      # pnpm (not npm) publishes so publishConfig.exports replaces the dev-only exports map.
-      # prepublishOnly builds and tests.
+      - name: Already published?
+        id: check
+        run: |
+          version="$(node -p "require('./ui/package.json').version")"
+          if npm view "@spyglassjs/ui@${version}" version >/dev/null 2>&1; then
+            echo "@spyglassjs/ui@${version} is already on npm; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and test
+        if: steps.check.outputs.skip != 'true'
+        run: pnpm --filter @spyglassjs/ui run build && pnpm --filter @spyglassjs/ui run test
+
+      # pnpm packs (its publishConfig.exports replaces the dev-only exports map);
+      # npm publishes, because npm is what speaks trusted publishing. Publishing a
+      # tarball skips lifecycle scripts, which is why build and test run above.
       - name: Publish
-        run: pnpm --filter @spyglassjs/ui publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: 'true'
+        if: steps.check.outputs.skip != 'true'
+        working-directory: ui
+        run: |
+          pnpm pack --pack-destination "$RUNNER_TEMP"
+          npm publish "$RUNNER_TEMP"/spyglassjs-ui-*.tgz --access public
