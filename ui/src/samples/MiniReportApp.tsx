@@ -1,5 +1,5 @@
 /**
- * MiniReportApp — a complete reports UI in ~60 lines, built from @spyglass/ui.
+ * MiniReportApp — a complete reports UI in ~60 lines, built from @spyglassjs/ui.
  * It shows how a host wires the framework:
  *   - hold a `Report` in state,
  *   - render it with <ReportCanvas> (filters + live widgets + edit controls),

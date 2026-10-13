@@ -1,8 +1,25 @@
 {
-  "name": "@spyglass/ui",
+  "name": "@spyglassjs/ui",
   "version": "0.1.0",
   "description": "JSON-expressible reporting widgets: metric, table, chart, note + a custom-component registry. Renders a ReportDoc. Pairs with the `spyglass` engine.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spyglass-dev/spyglass.git",
+    "directory": "ui"
+  },
+  "homepage": "https://github.com/spyglass-dev/spyglass/tree/main/ui#readme",
+  "bugs": {
+    "url": "https://github.com/spyglass-dev/spyglass/issues"
+  },
+  "keywords": [
+    "reporting",
+    "dashboard",
+    "semantic-layer",
+    "react",
+    "vega-lite",
+    "spyglass"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -15,14 +32,19 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "type-check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "prepublishOnly": "pnpm run build && pnpm run test"
   },
   "dependencies": {
     "react-vega": "^8.0.0",
@@ -35,7 +57,9 @@
     "react-dom": ">=18"
   },
   "peerDependenciesMeta": {
-    "lucide-react": { "optional": true }
+    "lucide-react": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@storybook/react-vite": "^10.4.6",
@@ -50,5 +74,15 @@
     "typescript": "^5.8.3",
     "vite": "^5.4.11",
     "vitest": "^3.2.4"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    }
   }
 }

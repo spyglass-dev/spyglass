@@ -31,7 +31,7 @@ and the engine compiles + scopes the SQL. The host pins the tenant scope
     "limit": 100
   }
   ```
-- **Widget** (JSON, fully expressible — see `@spyglass/ui`): `metric`,
+- **Widget** (JSON, fully expressible — see `@spyglassjs/ui`): `metric`,
   `table`, `chart` (mark `bar|line|area|progress`), `note` (markdown), or
   `custom` (host-defined). A widget carries the **data** it renders; you map a
   query result into a widget.
@@ -53,7 +53,7 @@ and the engine compiles + scopes the SQL. The host pins the tenant scope
 
 ## Tool order: recognise → verify → build
 
-When the host registers the report tools (`@spyglass/ui`'s `buildReportTools`),
+When the host registers the report tools (`@spyglassjs/ui`'s `buildReportTools`),
 the order they are used in is part of the contract, not a preference:
 
 1. **`find_reference_queries`** — FIRST, before composing anything. The model

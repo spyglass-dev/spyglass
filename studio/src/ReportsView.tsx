@@ -2,7 +2,7 @@
  *  (resolving its queries under the chosen scope + filter bar), and render it
  *  live. */
 import { useEffect, useMemo, useState } from 'react'
-import { ReportView, type ReportDoc, type WidgetRegistry } from '@spyglass/ui'
+import { ReportView, type ReportDoc, type WidgetRegistry } from '@spyglassjs/ui'
 import {
   server,
   scopeForWorkspace,

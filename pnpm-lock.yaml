@@ -10,7 +10,7 @@ importers:
 
   studio:
     dependencies:
-      '@spyglass/ui':
+      '@spyglassjs/ui':
         specifier: workspace:*
         version: link:../ui
       react:

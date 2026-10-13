@@ -45,7 +45,7 @@ spyglass/
   tests/              # cargo tests (pure compiler — no DB)
   examples/           # generic, domain-agnostic cube definitions
   skills/             # distri agent skills + local-development runbook
-  ui/                 # @spyglass/ui — embeddable JSON-expressible widgets (React) + Storybook
+  ui/                 # @spyglassjs/ui — embeddable JSON-expressible widgets (React) + Storybook
   studio/             # @spyglass/studio — standalone query/editor app (Vite)
   web/                # Docusaurus docs site (docs in web/docs)
   testing/            # LOCAL dev + test harness — gitignored (see above)
@@ -62,9 +62,9 @@ cargo clippy
 
 # JS workspace (widgets + app)
 pnpm install
-pnpm dev          # studio app (Vite) — consumes @spyglass/ui from source, live HMR
-pnpm storybook    # develop @spyglass/ui widgets in isolation (Storybook, HMR)
-pnpm test         # @spyglass/ui widget tests
+pnpm dev          # studio app (Vite) — consumes @spyglassjs/ui from source, live HMR
+pnpm storybook    # develop @spyglassjs/ui widgets in isolation (Storybook, HMR)
+pnpm test         # @spyglassjs/ui widget tests
 pnpm build        # build ui (lib) → studio → web
 
 # Run the server against your local DB
@@ -73,14 +73,14 @@ spyglass-server -C testing serve
 
 ## JS packages
 
-- **`@spyglass/ui`** (`ui/`) — the widget library: JSON-expressible widgets
+- **`@spyglassjs/ui`** (`ui/`) — the widget library: JSON-expressible widgets
   (metric/table/chart/note) + a custom-component registry, as embeddable React
   components. Built to `dist/`, but exposes a `development` export condition
   (`./src/index.ts`) so the studio app and Vite consume its **source** in dev
   (live HMR, no build step). Develop widgets in isolation with `pnpm storybook`.
 - **`@spyglass/studio`** (`studio/`) — the standalone Vite app: edit a report's
   JSON, render it live, persist to IndexedDB, import/export. Depends on
-  `@spyglass/ui`. `pnpm dev` runs this.
+  `@spyglassjs/ui`. `pnpm dev` runs this.
 
 ## Skills
 

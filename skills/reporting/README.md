@@ -2,7 +2,7 @@
 
 Generic, domain-agnostic skill definitions that make a distri agent build and
 edit **Spyglass reports** from natural language. They pair with the frontend
-tools exported by `@spyglass/ui` (`buildReportTools(host)` →
+tools exported by `@spyglassjs/ui` (`buildReportTools(host)` →
 `create_report` + `add_report_widget`) and the `ReportCanvas` component.
 
 Deploy them to your workspace like any distri skill:
@@ -28,7 +28,7 @@ widget is **bound** — it carries a cube query (`measures` / `dimensions` /
 using your model's members (`Cube.measure`, `Cube.dimension`) — discover them
 from your `/meta` catalog (or `schema-to-cubes.md`).
 
-Widget vocabulary (also `WIDGET_VOCAB` in `@spyglass/ui`):
+Widget vocabulary (also `WIDGET_VOCAB` in `@spyglassjs/ui`):
 
 - `bound` — `{ type:"bound", as:"metric"|"table"|"chart", query, title?, w?, label?, format?, mark?, x?, y? }`. Prefer this for data.
 - `metric` / `table` / `chart` — static (data inline). `note` — markdown.

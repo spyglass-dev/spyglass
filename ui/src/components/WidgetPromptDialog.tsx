@@ -7,7 +7,7 @@
  * report — which is the whole reason `edit_report_widget` exists.
  *
  * Deliberately dependency-free: a plain overlay rather than a dialog library,
- * because `@spyglass/ui` is embedded in hosts that already ship their own and
+ * because `@spyglassjs/ui` is embedded in hosts that already ship their own and
  * two dialog implementations in one tree is how focus handling breaks. Styling
  * is Tailwind design tokens, like the rest of the library.
  */

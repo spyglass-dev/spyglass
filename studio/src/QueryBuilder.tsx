@@ -1,7 +1,7 @@
 /** Point-and-click query builder: pick a cube + measures/dimensions, run it
  *  against /query (scoped by the header value), and render the result. */
 import { useMemo, useState } from 'react'
-import { Widget, type WidgetSpec, type TableColumn } from '@spyglass/ui'
+import { Widget, type WidgetSpec, type TableColumn } from '@spyglassjs/ui'
 import { server, type ModelMeta } from './server'
 import { S } from './theme'
 

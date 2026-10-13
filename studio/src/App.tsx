@@ -5,7 +5,7 @@
  * Vite `/api` proxy; built + embedded into the server it's same-origin.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { ReportView, type ReportDoc, type WidgetRegistry, type WidgetSpec } from '@spyglass/ui'
+import { ReportView, type ReportDoc, type WidgetRegistry, type WidgetSpec } from '@spyglassjs/ui'
 import { reportsDb, type StoredReport } from './idb'
 import { server, type ModelMeta } from './server'
 import { CubesView } from './CubesView'
