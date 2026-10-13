@@ -281,7 +281,9 @@ export function cellShade(
 function renderCell(cell: PivotCell, empty: PivotSpec['empty'], format?: ValueFormat): string {
   if (cell.state === 'absent') return empty === 'zero' ? formatValue(0, format) : '—'
   if (cell.state === 'null') return 'n/a'
-  return formatValue(cell.value, format)
+  // A heatmap is read for its pattern: money goes compact ($457.7K) so a
+  // grid fits its card. The exact figure is in the cell's title.
+  return formatValue(cell.value, format, { compact: true })
 }
 
 const headerStyle: CSSProperties = {
@@ -355,7 +357,13 @@ export function Pivot({
                       key={built.cols[ci].key}
                       onClick={drillable ? () => onMeasureClick(cell.row, spec.measure) : undefined}
                       role={drillable ? 'button' : undefined}
-                      title={drillable ? 'Show the records behind this cell' : undefined}
+                      title={
+                        cell.state === 'value' && typeof cell.value === 'number'
+                          ? `${formatValue(cell.value, spec.format)}${drillable ? ' · show the records behind this cell' : ''}`
+                          : drillable
+                            ? 'Show the records behind this cell'
+                            : undefined
+                      }
                       style={{
                         padding: '8px 12px',
                         textAlign: 'right',
@@ -377,7 +385,7 @@ export function Pivot({
                 })}
                 {spec.totals?.row && (
                   <td style={totalCell}>
-                    {r.total === undefined ? '—' : formatValue(r.total, spec.format)}
+                    {r.total === undefined ? '—' : formatValue(r.total, spec.format, { compact: true })}
                   </td>
                 )}
               </tr>
@@ -389,12 +397,12 @@ export function Pivot({
                 </td>
                 {built.colTotals.map((t, ci) => (
                   <td key={built.cols[ci].key} style={totalCell}>
-                    {t === undefined ? '—' : formatValue(t, spec.format)}
+                    {t === undefined ? '—' : formatValue(t, spec.format, { compact: true })}
                   </td>
                 ))}
                 {spec.totals?.row && (
                   <td style={totalCell}>
-                    {built.grandTotal === undefined ? '—' : formatValue(built.grandTotal, spec.format)}
+                    {built.grandTotal === undefined ? '—' : formatValue(built.grandTotal, spec.format, { compact: true })}
                   </td>
                 )}
               </tr>

@@ -1,0 +1,151 @@
+# Lighthouse Outfitters: the demo model. Four cubes over the generated
+# dataset (seed.sql). Shared dimension names (region, channel, device) let one
+# filter bar apply across every cube that has them.
+cubes:
+  Orders:
+    title: Orders
+    description: One row per order, with the customer's region and segment.
+    sql: >
+      select o.*, c.name as customer_name, c.region, c.country, c.segment
+      from orders o join customers c on c.id = o.customer_id
+    dimensions:
+      id: { type: number, sql: id, title: Order, drill: { entity: order } }
+      customer_id: { type: number, sql: customer_id, title: Customer, label: customer_name, drill: { entity: customer } }
+      customer_name: { type: string, sql: customer_name, title: Customer }
+      ordered_at: { type: time, sql: ordered_at, title: Ordered, featured: true }
+      status: { type: string, sql: status, title: Status, filterable: true }
+      channel: { type: string, sql: channel, title: Channel, filterable: true, featured: true }
+      device: { type: string, sql: device, title: Device, filterable: true }
+      region: { type: string, sql: region, title: Region, filterable: true, featured: true }
+      country: { type: string, sql: country, title: Country, filterable: true }
+      segment: { type: string, sql: segment, title: Segment, filterable: true }
+      revenue_value: { type: number, sql: revenue, title: Order value }
+    measures:
+      count: { type: count, title: Orders, unit: orders, featured: true }
+      revenue:
+        type: sum
+        sql: "case when status <> 'cancelled' then revenue else 0 end"
+        title: Revenue
+        format: currency
+        featured: true
+        description: Order value after discounts, excluding cancelled orders. Returns are still counted.
+      net_revenue:
+        type: sum
+        sql: "case when status = 'completed' then revenue else 0 end"
+        title: Net revenue
+        format: currency
+        description: Revenue from orders that were neither cancelled nor returned.
+      cost_of_goods: { type: sum, sql: "case when status = 'completed' then cost else 0 end", title: Cost of goods, format: currency, hidden: true }
+      returned: { type: sum, sql: "case when status = 'returned' then 1 else 0 end", title: Returned orders, hidden: true }
+      discounted: { type: sum, sql: "case when discount > 0 then 1 else 0 end", title: Discounted orders, hidden: true }
+      aov:
+        type: number
+        sql: "${CUBE.revenue} / nullif(${CUBE.count}, 0)"
+        title: Average order value
+        format: currency
+        featured: true
+      margin:
+        type: number
+        sql: "(${CUBE.net_revenue} - ${CUBE.cost_of_goods}) / nullif(${CUBE.net_revenue}, 0) * 100"
+        title: Gross margin
+        format: percent
+        description: Net revenue minus cost of goods, as a share of net revenue.
+      return_rate:
+        type: number
+        sql: "${CUBE.returned} / nullif(${CUBE.count}, 0) * 100"
+        title: Return rate
+        format: percent
+      discount_rate:
+        type: number
+        sql: "${CUBE.discounted} / nullif(${CUBE.count}, 0) * 100"
+        title: Orders on discount
+        format: percent
+      customers: { type: count_distinct, sql: customer_id, title: Customers, unit: customers }
+      units: { type: sum, sql: units, title: Units sold, unit: units }
+    drill_members: [id, ordered_at, customer_id, customer_name, region, channel, status, revenue_value]
+
+  OrderItems:
+    title: Products sold
+    description: One row per order line, with the product and the order's context.
+    sql: >
+      select oi.*, o.ordered_at, o.status, o.channel, o.device, o.discount, c.region,
+             p.name as product, p.category, p.subcategory, p.price, p.cost
+      from order_items oi
+      join orders o on o.id = oi.order_id
+      join customers c on c.id = o.customer_id
+      join products p on p.id = oi.product_id
+    dimensions:
+      id: { type: number, sql: id, hidden: true }
+      order_id: { type: number, sql: order_id, title: Order, drill: { entity: order } }
+      product_id: { type: number, sql: product_id, title: Product, label: product, drill: { entity: product } }
+      product: { type: string, sql: product, title: Product, filterable: true, featured: true }
+      category: { type: string, sql: category, title: Category, filterable: true, featured: true }
+      subcategory: { type: string, sql: subcategory, title: Subcategory, filterable: true }
+      ordered_at: { type: time, sql: ordered_at, title: Ordered }
+      channel: { type: string, sql: channel, title: Channel, filterable: true }
+      device: { type: string, sql: device, title: Device, filterable: true }
+      region: { type: string, sql: region, title: Region, filterable: true }
+      status: { type: string, sql: status, title: Status }
+    measures:
+      units: { type: sum, sql: quantity, title: Units sold, unit: units, featured: true }
+      revenue:
+        type: sum
+        sql: "case when status <> 'cancelled' then quantity * price * (1 - discount) else 0 end"
+        title: Product revenue
+        format: currency
+        featured: true
+      lines: { type: count, title: Order lines, hidden: true }
+      returned_units: { type: sum, sql: "case when status = 'returned' then quantity else 0 end", hidden: true }
+      return_rate:
+        type: number
+        sql: "${CUBE.returned_units} / nullif(${CUBE.units}, 0) * 100"
+        title: Unit return rate
+        format: percent
+      margin:
+        type: number
+        sql: "sum(case when status = 'completed' then quantity * (price * (1 - discount) - cost) else 0 end) / nullif(sum(case when status = 'completed' then quantity * price * (1 - discount) else 0 end), 0) * 100"
+        title: Product margin
+        format: percent
+    drill_members: [order_id, ordered_at, product, category, region, channel, status]
+
+  Customers:
+    title: Customers
+    description: Everyone with an account, by where they live and how they found the store.
+    sql_table: customers
+    dimensions:
+      id: { type: number, sql: id, title: Customer, label: name, drill: { entity: customer } }
+      name: { type: string, sql: name, title: Name }
+      signed_up_at: { type: time, sql: signed_up_at, title: Signed up, featured: true }
+      region: { type: string, sql: region, title: Region, filterable: true }
+      country: { type: string, sql: country, title: Country, filterable: true }
+      segment: { type: string, sql: segment, title: Segment, filterable: true, featured: true }
+      channel: { type: string, sql: acquisition_channel, title: Acquisition channel, filterable: true }
+    measures:
+      count: { type: count, title: Customers, unit: customers, featured: true }
+    drill_members: [id, name, signed_up_at, region, country, segment, channel]
+
+  Traffic:
+    title: Web traffic
+    description: Sessions and the checkout funnel, per day, channel and device.
+    sql_table: traffic
+    dimensions:
+      day: { type: time, sql: day, title: Day, featured: true }
+      channel: { type: string, sql: channel, title: Channel, filterable: true, featured: true }
+      device: { type: string, sql: device, title: Device, filterable: true }
+    measures:
+      sessions: { type: sum, sql: sessions, title: Sessions, unit: sessions, featured: true }
+      carts: { type: sum, sql: carts, title: Added to cart, unit: sessions }
+      checkouts: { type: sum, sql: checkouts, title: Reached checkout, unit: sessions }
+      purchases: { type: sum, sql: purchases, title: Purchased, unit: sessions }
+      conversion_rate:
+        type: number
+        sql: "${CUBE.purchases} / nullif(${CUBE.sessions}, 0) * 100"
+        title: Conversion rate
+        format: percent
+        featured: true
+        description: Share of sessions that ended in a purchase.
+      cart_rate:
+        type: number
+        sql: "${CUBE.carts} / nullif(${CUBE.sessions}, 0) * 100"
+        title: Add-to-cart rate
+        format: percent

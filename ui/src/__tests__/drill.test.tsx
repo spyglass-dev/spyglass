@@ -118,14 +118,14 @@ describe('DrillBreadcrumb', () => {
     render(<DrillBreadcrumb trail={trail} onPop={onPop} />)
     fireEvent.click(screen.getByText('All'))
     expect(onPop).toHaveBeenCalledWith(0)
-    fireEvent.click(screen.getByText(/customer: Karl Seal/))
+    fireEvent.click(screen.getByText(/Customer: Karl Seal/))
     expect(onPop).toHaveBeenCalledWith(1)
   })
 
   it('the last step is the current scope, not a pop target', () => {
     const onPop = vi.fn()
     render(<DrillBreadcrumb trail={trail} onPop={onPop} />)
-    fireEvent.click(screen.getByText(/status: paid/))
+    fireEvent.click(screen.getByText(/Status: paid/))
     expect(onPop).not.toHaveBeenCalled()
   })
 })
@@ -235,7 +235,7 @@ describe('ReportCanvas default drill-down', () => {
     await waitFor(() => expect(runQuery).toHaveBeenCalled())
     const query = runQuery.mock.calls[0][0] as { filters?: { member: string }[] }
     expect(query.filters).toEqual([{ member: 'Orders.customer_id', operator: 'equals', values: ['c1'] }])
-    expect(screen.getByText(/customer: Karl Seal/)).toBeTruthy()
+    expect(screen.getByText(/Customer: Karl Seal/)).toBeTruthy()
   })
 
   /**
@@ -270,7 +270,7 @@ describe('ReportCanvas default drill-down', () => {
   it('shows the drill trail in the filter bar for a report with no facets', async () => {
     const drilled: Report = { ...report, drill: [step('Orders.customer_id', 'c1', { label: 'Karl Seal' })] }
     render(<ReportCanvas report={drilled} onChange={() => {}} runQuery={async () => result} />)
-    expect(await screen.findByText(/customer: Karl Seal/)).toBeTruthy()
+    expect(await screen.findByText(/Customer: Karl Seal/)).toBeTruthy()
     expect(screen.getByRole('button', { name: /clear/i })).toBeTruthy()
   })
 })

@@ -12,6 +12,7 @@ export type DateRangePreset =
   | 'last_7d'
   | 'last_30d'
   | 'last_90d'
+  | 'last_12m'
   | 'this_week'
   | 'this_month'
   | 'ytd'
@@ -67,6 +68,7 @@ export const DATE_PRESETS: { value: DateRangePreset; label: string }[] = [
   { value: 'last_7d', label: 'Last 7 days' },
   { value: 'last_30d', label: 'Last 30 days' },
   { value: 'last_90d', label: 'Last 90 days' },
+  { value: 'last_12m', label: 'Last 12 months' },
   { value: 'this_week', label: 'This week' },
   { value: 'this_month', label: 'This month' },
   { value: 'ytd', label: 'Year to date' },
@@ -98,6 +100,8 @@ export function resolveDatePreset(preset: DateRangePreset): [string, string] | n
       return [ago(30 * D), to]
     case 'last_90d':
       return [ago(90 * D), to]
+    case 'last_12m':
+      return [ago(365 * D), to]
     case 'this_week': {
       const d = new Date(now)
       d.setHours(0, 0, 0, 0)

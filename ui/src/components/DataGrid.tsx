@@ -139,10 +139,8 @@ function PillCell({ raw, column }: { raw: unknown; column: TableColumn }) {
 
 const headerCell: CSSProperties = {
   padding: '8px 12px',
-  fontSize: 11,
-  fontWeight: 700,
-  textTransform: 'uppercase',
-  letterSpacing: '0.05em',
+  fontSize: 12,
+  fontWeight: 600,
   color: tokens.textMuted,
   background: tokens.muted,
   position: 'sticky',
@@ -158,6 +156,7 @@ export function DataGrid({
   onQuery,
   onDrill,
   onMeasureClick,
+  framed,
 }: {
   spec: TableSpec
   /** Present = server-driven: header clicks and the pager emit query deltas.
@@ -169,8 +168,12 @@ export function DataGrid({
   /** Present = measure cells open row mode (the records drawer) — clicking
    *  one hands back the row and the measure's column key. */
   onMeasureClick?: (row: Record<string, unknown>, columnKey: string) => void
+  /** Drawn inside a widget card: no border of its own, and no CSV button —
+   *  the card's export menu owns exporting. */
+  framed?: boolean
 }) {
   const cols = visibleColumns(spec)
+  const [hover, setHover] = useState<number | null>(null)
   const offset = spec.page?.offset ?? 0
   const limit = spec.page?.limit
   const [scrollTop, setScrollTop] = useState(0)
@@ -215,13 +218,13 @@ export function DataGrid({
   }
 
   return (
-    <div style={{ border: `1px solid ${tokens.border}`, borderRadius: 10, background: tokens.bg }}>
+    <div style={framed ? { margin: '0 -16px -16px' } : { border: `1px solid ${tokens.border}`, borderRadius: 10, background: tokens.bg }}>
       <div
         ref={scroller}
         onScroll={virtual ? (e) => setScrollTop((e.target as HTMLDivElement).scrollTop) : undefined}
-        style={{ overflow: 'auto', maxHeight: VIEWPORT, borderRadius: '10px 10px 0 0' }}
+        style={{ overflow: 'auto', maxHeight: VIEWPORT, borderRadius: framed ? 0 : '10px 10px 0 0' }}
       >
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
           <thead>
             <tr style={{ textAlign: 'left' }}>
               {cols.map((c, i) => {
@@ -255,7 +258,12 @@ export function DataGrid({
               </tr>
             )}
             {spec.rows.slice(win.start, win.end).map((row, i) => (
-              <tr key={win.start + i} style={{ borderTop: `1px solid ${tokens.border}` }}>
+              <tr
+                key={win.start + i}
+                onMouseEnter={() => setHover(win.start + i)}
+                onMouseLeave={() => setHover(null)}
+                style={{ borderTop: `1px solid ${tokens.border}`, background: hover === win.start + i ? tokens.muted : undefined }}
+              >
                 {cols.map((c, ci) => {
                   const raw = cellValue(row, c.key)
                   const barValue =
@@ -280,6 +288,8 @@ export function DataGrid({
                       key={c.key}
                       onClick={click}
                       role={click ? 'button' : undefined}
+                      tabIndex={click ? 0 : undefined}
+                      onKeyDown={click ? (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), click()) : undefined}
                       style={{
                         padding: '8px 12px',
                         textAlign: c.align ?? 'left',
@@ -291,7 +301,7 @@ export function DataGrid({
                         ...(drills
                           ? { textDecoration: 'underline', textDecorationColor: tokens.accentSoft, textUnderlineOffset: 3 }
                           : {}),
-                        ...(ci === 0 ? stickyFirst : {}),
+                        ...(ci === 0 ? { ...stickyFirst, background: hover === win.start + i ? tokens.muted : tokens.bg } : {}),
                         ...(barValue !== undefined && barMax > 0
                           ? {
                               backgroundImage: `linear-gradient(to right, ${tokens.accentSoft} ${(barValue / barMax) * 100}%, transparent ${(barValue / barMax) * 100}%)`,
@@ -366,9 +376,11 @@ export function DataGrid({
                 </button>
               </>
             )}
-            <button type="button" style={pageBtn} onClick={() => downloadCsv(spec)}>
-              CSV
-            </button>
+            {!framed && (
+              <button type="button" style={pageBtn} onClick={() => downloadCsv(spec)}>
+                CSV
+              </button>
+            )}
           </span>
         </div>
       )}

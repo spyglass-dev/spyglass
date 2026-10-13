@@ -17,6 +17,7 @@ import type {
 } from './types'
 import {
   draftToWidgetSpec,
+  normalizeQuery,
   type WidgetDraft,
   type WidgetQuery,
   type QueryFilter,
@@ -25,6 +26,7 @@ import {
 import { resolveDateRange, hasActiveFilters, type FilterFacet, type ReportFilters } from './filters'
 import { applyDrillTrail, type DrillTrail } from './drill'
 import { checkViewContract, type ViewRegistry } from './views'
+import type { MemberIndex } from './members'
 
 // ── Filter spec (declared filters) ───────────────────────────────────────────
 
@@ -79,6 +81,8 @@ export interface Provenance {
 /** A data widget bound to a query, plus its visualization + filter behavior. */
 export interface BoundWidget extends WidgetDraft {
   type: 'bound'
+  /** Stable id (see `reports/session`) — agents address widgets by it. */
+  id?: string
   /** Grid width (1–4). */
   w?: WidgetWidth
   /** Narrow this widget to one student (passed to the runner). */
@@ -92,6 +96,7 @@ export interface BoundWidget extends WidgetDraft {
  *  checks the manifest's contract; the result is a data-bearing `ViewSpec`. */
 export interface ViewWidget {
   type: 'view'
+  id?: string
   component: string
   query?: WidgetQuery
   props?: Record<string, unknown>
@@ -242,6 +247,9 @@ export interface ResolveOptions {
   views?: ViewRegistry
   /** Map a raw error to a friendly one-liner for the error widget. */
   humanizeError?: (detail: string) => string
+  /** The model's titles/formats/descriptions (`memberIndex(meta)`), so
+   *  widgets say "Average order value" in dollars instead of "Aov". */
+  members?: MemberIndex
 }
 
 const isBound = (w: ReportWidget): w is BoundWidget => (w as BoundWidget).type === 'bound'
@@ -251,17 +259,88 @@ const isView = (w: ReportWidget): w is ViewWidget => (w as ViewWidget).type === 
  *  spec carries `applied` — which report filters reached the query — so a
  *  widget frame can mark scope the filters could not reach. */
 export async function resolveBound(
-  widget: BoundWidget,
+  source: BoundWidget,
   opts: ResolveOptions,
 ): Promise<WidgetSpec> {
+  const widget = source.query.order ? { ...source, query: normalizeQuery(source.query) } : source
   const { query, applied } = applyFilters(widget, opts.filters, opts.cubeCaps ?? {})
   const cube = queryCube(query)
-  const drilled = opts.drill?.length
-    ? applyDrillTrail(query, opts.drill, cube, cube ? opts.cubeCaps?.[cube]?.dims : undefined)
+  // A chart CROSS-FILTERS: a drill step on the member it is broken down by
+  // does not narrow the chart itself to one bar — it stays whole and the
+  // selection is highlighted, while every other widget narrows. Tables keep
+  // filter-in-place (clicking a customer row shows that customer).
+  const own = widget.as === 'chart' ? chartMembers(widget) : []
+  const trail = (opts.drill ?? []).filter((step) => !own.includes(step.member))
+  const highlight = (opts.drill ?? []).filter((step) => own.includes(step.member)).map((step) => step.value)
+  const drilled = trail.length
+    ? applyDrillTrail(query, trail, cube, cube ? opts.cubeCaps?.[cube]?.dims : undefined)
     : query
-  const result = await opts.runQuery(drilled, { studentId: widget.studentId })
-  const spec: WidgetSpec = { ...draftToWidgetSpec({ ...widget, query: drilled }, result), applied }
+  const trendQuery = widget.as === 'metric' && widget.trend ? metricTrendQuery(drilled, cube, opts.cubeCaps) : null
+  const [result, trendResult] = await Promise.all([
+    opts.runQuery(drilled, { studentId: widget.studentId }),
+    // A sparkline that fails is not worth a widget error — the number stands.
+    trendQuery ? opts.runQuery(trendQuery, { studentId: widget.studentId }).catch(() => null) : null,
+  ])
+  let spec: WidgetSpec = { ...draftToWidgetSpec({ ...widget, query: drilled }, result, opts.members), applied }
+  if (spec.type === 'metric' && trendQuery && trendResult) {
+    const measure = widget.query.measures?.[0] ?? ''
+    const time = trendQuery.timeDimensions?.[0]?.dimension ?? ''
+    spec = {
+      ...spec,
+      trend: {
+        values: trendResult.rows.map((r) => Number(r[measure]) || 0),
+        labels: trendResult.rows.map((r) => String(r[time] ?? '')),
+      },
+    }
+  }
+  if (spec.type === 'chart' && highlight.length) spec = { ...spec, chart: { ...spec.chart, highlight } }
   return widget.w ? { ...spec, w: widget.w } : spec
+}
+
+/** The members a chart is broken down by — its x and color split. */
+function chartMembers(widget: BoundWidget): string[] {
+  const dims = widget.query.dimensions ?? []
+  const out = [widget.x, widget.color].filter((m): m is string => !!m).map((m) => m.replace(/__label$/, ''))
+  // An x the draft leaves implicit is the first dimension that is not the split.
+  if (!widget.x) {
+    const implicit = dims.find((d) => d !== widget.color)
+    if (implicit) out.push(implicit)
+  }
+  return out
+}
+
+const DAY_MS = 86_400_000
+
+/**
+ * The query behind a metric's sparkline: the metric's own (filtered, drilled)
+ * query, bucketed over its window. The bucket follows the window's width — a
+ * month of days, a quarter of weeks, a year of months — so the line has 12–31
+ * points rather than 3 or 700.
+ */
+export function metricTrendQuery(
+  query: WidgetQuery,
+  cube: string | undefined,
+  caps: CubeCapsMap | undefined,
+): WidgetQuery | null {
+  const td = query.timeDimensions?.[0]
+  const member = td?.dimension ?? (cube && caps?.[cube]?.timeField ? `${cube}.${caps[cube].timeField}` : undefined)
+  if (!member) return null
+  const gte = query.filters?.find((f) => f.member === member && f.operator === 'gte')?.values?.[0]
+  const lt = query.filters?.find((f) => f.member === member && f.operator === 'lt')?.values?.[0]
+  const range = td?.dateRange ?? (gte && lt ? ([String(gte), String(lt)] as [string, string]) : undefined)
+  let days = 365
+  if (Array.isArray(range)) days = (Date.parse(range[1]) - Date.parse(range[0])) / DAY_MS
+  else if (typeof range === 'string') {
+    const m = /(\d+)\s*(day|week|month|year)/.exec(range)
+    if (m) days = Number(m[1]) * ({ day: 1, week: 7, month: 30, year: 365 } as const)[m[2] as 'day']
+  }
+  const granularity = days <= 45 ? 'day' : days <= 200 ? 'week' : 'month'
+  return {
+    measures: query.measures?.slice(0, 1),
+    filters: query.filters,
+    timeDimensions: [{ dimension: member, granularity, ...(range ? { dateRange: range } : {}) }],
+    order: [{ member }],
+  }
 }
 
 /** Resolve one view widget: run its query under the report's filters + drill
@@ -371,8 +450,8 @@ export function rowsQueryFor(
 // ── Draft <-> bound widget ───────────────────────────────────────────────────
 
 export function widgetToDraft(b: BoundWidget): WidgetDraft {
-  const { as, query, title, label, format, mark, x, y, color, stack, pivot } = b
-  return { as, query, title, label, format, mark, x, y, color, stack, pivot }
+  const { as, query, title, label, format, mark, x, y, color, stack, pivot, y2, target, height, trend, upIsGood } = b
+  return { as, query, title, label, format, mark, x, y, color, stack, pivot, y2, target, height, trend, upIsGood }
 }
 export function draftToBound(draft: WidgetDraft, prev?: BoundWidget): BoundWidget {
   return {

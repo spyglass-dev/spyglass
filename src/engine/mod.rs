@@ -12,6 +12,9 @@ use crate::query::Query;
 
 #[cfg(feature = "clickhouse")]
 pub mod clickhouse;
+pub mod run;
+
+pub use run::{assemble_run, plan_run, JsonRow, PrevWindow, RunPlan};
 #[cfg(feature = "postgres")]
 pub mod postgres;
 

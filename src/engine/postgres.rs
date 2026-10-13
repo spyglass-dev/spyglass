@@ -167,59 +167,17 @@ impl PostgresEngine {
         ctx: &SecurityContext,
     ) -> Result<QueryResult, EngineError> {
         let started = Instant::now();
-
-        // Row cap: clamp an unbounded (or larger) limit BEFORE compiling so
-        // the cap happens in SQL, and remember that we did — a result that
-        // then fills the cap is reported as truncated, never silently
-        // complete-looking.
-        let (effective, clamped): (std::borrow::Cow<Query>, bool) = match self.max_rows {
-            Some(max) if query.limit.is_none_or(|l| l > max) => {
-                let mut q = query.clone();
-                q.limit = Some(max);
-                (std::borrow::Cow::Owned(q), true)
-            }
-            _ => (std::borrow::Cow::Borrowed(query), false),
-        };
-        let query: &Query = effective.as_ref();
         // One clock per run: the current window and any comparison window
-        // resolve against the SAME instant.
-        let now = chrono::Utc::now();
-        let compiled = crate::compiler::compile_at(model, query, ctx, now)?;
-
-        // Comparison window, compiled UP FRONT so the cache key covers it —
-        // a compare and a non-compare query share the current-window SQL and
-        // must never collide in the cache. Execution happens after the main
-        // fetch (and only on a cache miss).
-        let prev: Option<(usize, crate::compiler::Compiled)> = match query
-            .time_dimensions
-            .iter()
-            .enumerate()
-            .find(|(_, td)| td.compare.is_some())
-        {
-            Some((idx, td)) => {
-                let kind = td.compare.expect("guarded by find");
-                let tz = crate::dates::parse_tz(query.timezone.as_deref())
-                    .map_err(crate::compiler::CompileError::BadTimezone)?;
-                let range = td
-                    .date_range
-                    .as_ref()
-                    .expect("compare validated to carry a range");
-                let (from, to) = crate::dates::resolve_date_range(range, now, tz)
-                    .map_err(crate::compiler::CompileError::BadDateRange)?;
-                let (prev_from, prev_to) = crate::dates::shift_window(&from, &to, kind)
-                    .map_err(crate::compiler::CompileError::BadDateRange)?;
-                let mut prev_query = query.clone();
-                prev_query.time_dimensions[idx].date_range =
-                    Some(crate::query::DateRange::Absolute([prev_from, prev_to]));
-                prev_query.time_dimensions[idx].compare = None;
-                prev_query.include_total = false;
-                Some((
-                    idx,
-                    crate::compiler::compile_at(model, &prev_query, ctx, now)?,
-                ))
-            }
-            None => None,
-        };
+        // resolve against the SAME instant. The row cap clamps in SQL, and a
+        // result that fills it is reported as truncated.
+        let plan = super::run::plan_run(
+            model,
+            query,
+            ctx,
+            chrono::Utc::now(),
+            self.dialect(),
+            self.max_rows,
+        )?;
 
         // Cache: keyed on SQL + params + the prev window's SQL/params + the
         // scope. Scope values already live in the params, but including the
@@ -228,9 +186,11 @@ impl PostgresEngine {
         // resolved instants are in the params, so midnight changes the key.
         let cache_key = self.cache.as_ref().map(|_| {
             serde_json::to_string(&(
-                &compiled.sql,
-                &compiled.params,
-                prev.as_ref().map(|(_, p)| (&p.sql, &p.params)),
+                &plan.main.sql,
+                &plan.main.params,
+                plan.prev
+                    .as_ref()
+                    .map(|p| (&p.compiled.sql, &p.compiled.params)),
                 &ctx.scope,
                 ctx.allow_unscoped,
             ))
@@ -242,37 +202,21 @@ impl PostgresEngine {
             }
         }
 
-        let mut json_rows = self
-            .fetch_json(&compiled.sql, &compiled.params, ctx)
+        let rows = self
+            .fetch_json(&plan.main.sql, &plan.main.params, ctx)
             .await?;
-
-        // Pull the include_total window column out of the payload: it becomes
-        // `total` on the result, never a visible column.
-        use crate::compiler::TOTAL_ALIAS;
-        let mut total = None;
-        let mut columns = compiled.columns;
-        if query.include_total {
-            total = Some(
-                json_rows
-                    .first()
-                    .and_then(|r| r.get(TOTAL_ALIAS))
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0),
-            );
-            for r in &mut json_rows {
-                r.remove(TOTAL_ALIAS);
-            }
-            columns.retain(|c| c.key != TOTAL_ALIAS);
-        }
-        let has_more = total
-            .map(|t| (query.offset.unwrap_or(0) as u64 + json_rows.len() as u64) < t)
-            .unwrap_or(false);
-        let truncated_at = match (clamped, self.max_rows) {
-            (true, Some(max)) if json_rows.len() as u32 == max => Some(max),
-            _ => None,
+        let prev_rows = match &plan.prev {
+            Some(prev) => Some(
+                self.fetch_json(&prev.compiled.sql, &prev.compiled.params, ctx)
+                    .await?,
+            ),
+            None => None,
         };
+        let row_count = rows.len();
+        let result = super::run::assemble_run(&plan, rows, prev_rows);
 
         if let Some(exporter) = &self.exporter {
+            let query = &plan.query;
             let cube = query
                 .measures
                 .iter()
@@ -288,41 +232,8 @@ impl PostgresEngine {
                 filter_count: query.filters.len(),
                 scope_keys: ctx.scope.keys().cloned().collect(),
                 duration_ms: started.elapsed().as_millis() as u64,
-                row_count: json_rows.len(),
+                row_count,
             });
-        }
-
-        let mut result = QueryResult {
-            columns,
-            rows: json_rows,
-            sql: Some(compiled.sql),
-            total,
-            has_more,
-            truncated_at,
-        };
-
-        // Comparison window: execute the shifted query compiled above and
-        // fold its measures in as `__prev_<measure>` columns.
-        if let Some((idx, prev_compiled)) = &prev {
-            let td = &query.time_dimensions[*idx];
-            let prev_rows = self
-                .fetch_json(&prev_compiled.sql, &prev_compiled.params, ctx)
-                .await?;
-            let prev_result = QueryResult {
-                columns: Vec::new(),
-                rows: prev_rows,
-                sql: None,
-                total: None,
-                has_more: false,
-                truncated_at: None,
-            };
-            let time_key = td.granularity.is_some().then(|| td.dimension.clone());
-            crate::compare::merge_prev(
-                &mut result,
-                &prev_result,
-                &query.measures,
-                time_key.as_deref(),
-            );
         }
 
         if let (Some(cache), Some(key)) = (&self.cache, cache_key) {

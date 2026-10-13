@@ -50,7 +50,7 @@ export const REPORT_FILTERS_SCHEMA = {
   properties: {
     datePreset: {
       type: 'string',
-      enum: ['last_1h', 'last_24h', 'last_7d', 'last_30d', 'last_90d', 'this_week', 'this_month', 'ytd', 'all'],
+      enum: ['last_1h', 'last_24h', 'last_7d', 'last_30d', 'last_90d', 'last_12m', 'this_week', 'this_month', 'ytd', 'all'],
     },
     dateFrom: { type: 'string' },
     dateTo: { type: 'string' },

@@ -39,6 +39,9 @@ export interface AppliedFilters {
 export interface WidgetBase {
   id?: string
   title?: string
+  /** One line under the title saying what the number means — the model's
+   *  description of the measure when the widget does not set one. */
+  description?: string
   /** Grid width (of 4). Defaults to full width (4). */
   w?: WidgetWidth
   /** Which report filters reached this widget's query (set by the resolver
@@ -53,7 +56,24 @@ export interface MetricSpec extends WidgetBase {
   value: number | string
   label?: string
   format?: ValueFormat
-  delta?: { value: number; trend?: 'up' | 'down' | 'flat'; suffix?: string; label?: string }
+  delta?: {
+    value: number
+    trend?: 'up' | 'down' | 'flat'
+    suffix?: string
+    label?: string
+    /** Relative change in percent (12.5 = +12.5%), when the previous value is
+     *  known and non-zero. The tile shows this; `value` stays the absolute
+     *  difference for readers who want it. */
+    pct?: number
+    /** `false` when a rise is bad news (return rate, cost) — the tile colors
+     *  the change by meaning, not by direction. */
+    upIsGood?: boolean
+  }
+  /** A small trend under the number: the same measure bucketed over the
+   *  report's window, oldest first. */
+  trend?: { values: number[]; labels?: string[] }
+  /** A goal the value is measured against — renders a meter. */
+  target?: { value: number; label?: string }
 }
 
 /** Pill tone for categorical cell values (status columns). */
@@ -121,6 +141,29 @@ export interface ChartSpec extends WidgetBase {
     /** For `progress`: the max value (defaults to 100). */
     max?: number
     format?: ValueFormat
+    /** Plot height in px (default 240). Horizontal bars size by row instead. */
+    height?: number
+    /** Display names for fields — axis/legend/tooltip text. Keyed by field. */
+    titles?: Record<string, string>
+    /** Per-field value formats; `format` is the fallback for value fields. */
+    formats?: Record<string, ValueFormat>
+    /** A second measure drawn as a line on its own right-hand axis, over the
+     *  bars or area of `y` — revenue bars with conversion rate on top. */
+    y2?: string
+    /** A horizontal reference line — a goal, a budget, last year's average. */
+    target?: { value: number; label?: string }
+    /** Draw `__prev_<y>` (the engine's comparison window) as a dashed ghost
+     *  series when the rows carry it. Default true. */
+    comparison?: boolean
+    /** Mark a time series' last bucket as in progress when it has not ended
+     *  (dashed line, faded bar). Default true. */
+    partial?: boolean
+    /** Category values to emphasise — the drill trail's selections. Other
+     *  marks fade, so the reader sees what the report is narrowed to. */
+    highlight?: unknown[]
+    /** `drill: { entity }` of the x/color members, keyed by field — what a
+     *  click on a mark means. */
+    entities?: Record<string, string>
     /** Escape hatch: a full Vega-Lite spec. When present it renders directly
      *  (with `series` injected as the default `data.values` if the spec omits
      *  its own data) and `mark`/`x`/`y`/`color` are ignored. Use for charts the
@@ -272,11 +315,57 @@ export function formatDateValue(value: number | string): string {
   })
 }
 
-export function formatValue(value: number | string, format?: ValueFormat): string {
+/** Host-wide formatting: the currency money is shown in, and the locale. */
+export interface FormatOptions {
+  /** ISO 4217 code. Default `USD`. */
+  currency: string
+  /** BCP 47 locale; `undefined` is the reader's own. */
+  locale?: string
+}
+
+const formatOptions: FormatOptions = { currency: 'USD' }
+
+/** Set the currency (and optionally locale) every widget formats money in. */
+export function setFormatOptions(next: Partial<FormatOptions>): void {
+  Object.assign(formatOptions, next)
+}
+
+export function getFormatOptions(): Readonly<FormatOptions> {
+  return formatOptions
+}
+
+/**
+ * Money at a glance: cents only below 1,000 (`$221.00`, `$12,480`), and
+ * compact from 100k when `compact` is set (`$12.4M`) — a stat tile reads the
+ * magnitude; the exact figure is in the table.
+ */
+export function formatCurrency(value: number, opts: { compact?: boolean } = {}): string {
+  if (!Number.isFinite(value)) return '—'
+  const { currency, locale } = formatOptions
+  const abs = Math.abs(value)
+  if (opts.compact && abs >= 100_000) {
+    return value.toLocaleString(locale, { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 1 })
+  }
+  const digits = abs >= 1000 ? 0 : 2
+  return value.toLocaleString(locale, { style: 'currency', currency, minimumFractionDigits: digits, maximumFractionDigits: digits })
+}
+
+export function formatValue(
+  value: number | string,
+  format?: ValueFormat,
+  opts: { compact?: boolean } = {},
+): string {
   if (format === 'date') return formatDateValue(value)
   if (typeof value === 'string') return value
   if (format === 'percent') return `${Math.round(value * 10) / 10}%`
-  if (format === 'currency') return value.toLocaleString(undefined, { style: 'currency', currency: 'USD' })
+  if (format === 'currency') return formatCurrency(value, opts)
   if (format === 'number') return formatNumber(value)
   return String(value)
+}
+
+/** A model `format` string narrowed to the formats the widgets know. */
+export function asValueFormat(format: string | undefined): ValueFormat | undefined {
+  return format === 'number' || format === 'percent' || format === 'currency' || format === 'date' || format === 'text'
+    ? format
+    : undefined
 }

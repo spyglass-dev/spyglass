@@ -6,7 +6,7 @@
  * reporting skill (see `spyglass/skills/reporting`).
  */
 import type { BoundWidget, Report, ReportWidget, ViewWidget } from './report'
-import type { CubeModelMeta, QueryResultLite, WidgetQuery } from './querybuilder'
+import { normalizeQuery, type CubeModelMeta, type QueryResultLite, type WidgetQuery } from './querybuilder'
 import { validateQuery } from './validate'
 import type { ViewRegistry } from './views'
 import type { FacetSpec } from './report'
@@ -99,13 +99,16 @@ export const WIDGET_VOCAB = [
   'bound — a data widget backed by a query: { type:"bound", as:"metric"|"table"|"chart", query:{ measures:["Cube.measure"], dimensions?:["Cube.dimension"], filters?, timeDimensions? }, title?, w?, label?, format?, mark?, x?, y? }. PREFER this for data.',
   'chart marks: bar (columns) · hbar (sideways — use for rankings and long category names) · line/area (over time) · point · arc (a donut for part-to-whole; past 6 slices the tail folds into "Other") · progress (a meter). A grid/heatmap is as:"pivot" with pivot.scale:"sequential".',
   'bound chart, MULTIPLE SERIES: y can be an array of measures ({ y:["Cube.a","Cube.b"] } → one series each), and color names a member to split by ({ dimensions:["Cube.workspace_id"], color:"Cube.workspace_id" } → one line per workspace). Add stack:false to group bars instead of stacking. Group by the member you color by, or there is only one series.',
+  'bound chart extras: y2:"Cube.measure" draws a second measure as a line on a right-hand axis over bars/area (revenue bars + margin line) · target:{ value, label? } draws a reference line · height (px, default 240). A chart broken down by a dimension is CLICKABLE: the reader drills, every other widget narrows, and the chart highlights the pick.',
+  'bound metric extras: trend:true adds a sparkline over the report window · filters:{ compare:"previous_period"|"previous_year" } adds the change vs the previous window (percent for amounts, points for rates) · upIsGood:false when a rise is bad (return rate, cost) · target:{ value, label? } adds a goal meter. Comparison works on line/area/bar charts over time too: the previous window draws as a dashed line.',
+  'bound pivot: { type:"bound", as:"pivot", query:{ measures:[one], dimensions:[rowDim, colDim] }, pivot:{ scale:"sequential" } } — a heatmap grid.',
   'metric — a static scalar: { type:"metric", value, label?, format?, w? }',
   'table — static rows: { type:"table", columns:[{key,label}], rows:[…], w? }',
   'chart — static series: { type:"chart", chart:{ mark:"bar"|"line"|"area", x?, y, series:[…] }, w? }',
   'note — markdown: { type:"note", markdown, w? }',
 ].join('\n')
 
-const VALID = new Set(['metric', 'table', 'chart', 'note', 'bound', 'view'])
+const VALID = new Set(['metric', 'table', 'chart', 'note', 'bound', 'view', 'pivot', 'custom'])
 /** A well-formed widget of a kind the renderer knows. Agents emit noise. */
 export const isReportWidget = (w: unknown): w is ReportWidget =>
   !!w && typeof w === 'object' && VALID.has((w as { type?: string }).type ?? '')
@@ -373,7 +376,7 @@ export function exploreDataTool(ctx: ToolContext): AgentTool {
       }
       if (!ctx.runQuery) return ok({ ok: false, error: 'No query runner configured.' })
       try {
-        const result = await ctx.runQuery({ ...a.query, limit: Math.min(a.query.limit ?? EXPLORE_ROW_CAP, 100) })
+        const result = await ctx.runQuery({ ...normalizeQuery(a.query), limit: Math.min(a.query.limit ?? EXPLORE_ROW_CAP, 100) })
         return ok({
           ok: true,
           columns: result.columns,

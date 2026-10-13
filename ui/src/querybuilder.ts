@@ -6,6 +6,7 @@
  */
 import type { WidgetSpec, MetricSpec, PivotSpec, TableColumn, ValueFormat, ChartMark } from './types'
 import type { AntiExample, ModelVocabulary, QueryExample } from './reports/references'
+import { memberInfo, type MemberIndex } from './members'
 
 // ── Catalog (mirrors the engine's /meta) ────────────────────────────────────
 
@@ -121,6 +122,16 @@ export interface WidgetDraft {
   /** Per-member column overrides (`as: 'table'`): label, format, pill. Keyed
    *  by result-column member key. */
   columns?: Record<string, Partial<Pick<TableColumn, 'label' | 'format' | 'pill'>>>
+  /** Chart: a second measure as a line on a right-hand axis (`as: 'chart'`). */
+  y2?: string
+  /** Chart: a horizontal reference line. Metric: a goal meter. */
+  target?: { value: number; label?: string }
+  /** Chart plot height in px. */
+  height?: number
+  /** Metric: draw a sparkline of this measure over the report's window. */
+  trend?: boolean
+  /** Metric: `false` when a rise is bad news (return rate, cost). */
+  upIsGood?: boolean
 }
 
 /** The shape a host's query runner returns (matches the engine's QueryResult). */
@@ -138,6 +149,26 @@ export interface QueryResultLite {
   /** The compiled SQL — the engine has always returned it; the Explain panel
    *  finally shows it. */
   sql?: string
+}
+
+/**
+ * Repair the order shapes agents write. The engine reads `{ member, desc }`;
+ * `{ member, sort: "desc" }` and `{ member, direction: "desc" }` deserialize
+ * without error and silently sort ascending — a "top 10" that shows the
+ * bottom 10. Identity-preserving when nothing needs repair.
+ */
+export function normalizeQuery(query: WidgetQuery): WidgetQuery {
+  if (!query.order?.length) return query
+  let changed = false
+  const order = query.order.map((o) => {
+    const loose = o as { member: string; desc?: boolean; sort?: string; direction?: string; dir?: string }
+    if (loose.desc !== undefined) return o
+    const word = (loose.sort ?? loose.direction ?? loose.dir ?? '').toLowerCase()
+    if (!word) return o
+    changed = true
+    return { member: o.member, desc: word === 'desc' || word === 'descending' }
+  })
+  return changed ? { ...query, order } : query
 }
 
 /** Merge a DataGrid sort/paging delta into a widget's query — the "sort and
@@ -177,8 +208,16 @@ export function humanizeMember(member: string): string {
 
 const short = humanizeMember
 
-/** Turn a query result into a data-bearing WidgetSpec, per the draft's viz. */
-export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): WidgetSpec {
+/** Turn a query result into a data-bearing WidgetSpec, per the draft's viz.
+ *  `members` (from `/meta`, see `memberIndex`) supplies titles, formats and
+ *  descriptions the draft does not set. */
+export function draftToWidgetSpec(
+  draft: WidgetDraft,
+  result: QueryResultLite,
+  members?: MemberIndex,
+): WidgetSpec {
+  const info = (key: string | undefined) => (key ? memberInfo(members, key) : undefined)
+  const title = (key: string) => info(key)?.title ?? short(key)
   if (draft.as === 'metric') {
     const measure = draft.query.measures?.[0]
     const raw = measure ? result.rows[0]?.[measure] : undefined
@@ -188,14 +227,20 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
     let delta: MetricSpec['delta']
     const prevRaw = measure ? result.rows[0]?.[`__prev_${measure}`] : undefined
     const prev = typeof prevRaw === 'number' ? prevRaw : prevRaw == null ? undefined : Number(prevRaw)
+    const format = draft.format ?? info(measure)?.format ?? 'number'
     if (prev !== undefined && !Number.isNaN(prev)) {
-      const diff = Math.round((value - prev) * 10) / 10
+      // Rates keep two decimals so a 0.04pt move survives to the tile.
+      const diff = format === 'percent' ? Math.round((value - prev) * 100) / 100 : Math.round((value - prev) * 10) / 10
       const compare = draft.query.timeDimensions?.find((td) => td.compare)?.compare
       delta = {
         value: diff,
         trend: diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat',
-        suffix: draft.format === 'percent' ? 'pt' : '',
+        suffix: format === 'percent' ? 'pt' : '',
         label: compare === 'previous_year' ? 'vs previous year' : 'vs previous period',
+        // A percentage of a percentage misleads ("conversion up 12%" when it
+        // moved 0.3pt), so rates report points only.
+        ...(format !== 'percent' && prev !== 0 ? { pct: Math.round(((value - prev) / Math.abs(prev)) * 1000) / 10 } : {}),
+        ...(draft.upIsGood === false ? { upIsGood: false } : {}),
       }
     }
     return {
@@ -203,9 +248,11 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
       title: draft.title,
       w: 1,
       value,
-      label: draft.label ?? (measure ? short(measure) : draft.title),
-      format: draft.format ?? 'number',
+      label: draft.label ?? draft.title ?? (measure ? title(measure) : undefined),
+      format,
+      ...(info(measure)?.description ? { description: info(measure)?.description } : {}),
       ...(delta ? { delta } : {}),
+      ...(draft.target ? { target: draft.target } : {}),
     }
   }
   if (draft.as === 'table') {
@@ -218,7 +265,7 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
         const over = draft.columns?.[c.key]
         return {
           key: c.key,
-          label: over?.label ?? short(c.key),
+          label: over?.label ?? title(c.key),
           align: c.kind === 'measure' ? 'right' : 'left',
           kind: c.kind,
           drillEntity: c.drill_entity,
@@ -228,7 +275,7 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
           // `2026-08-17 04:07:00+00`, which is a timestamp, not a label.
           format:
             over?.format ??
-            (c.kind === 'time' ? 'date' : c.kind === 'measure' ? draft.format : undefined),
+            (c.kind === 'time' ? 'date' : c.kind === 'measure' ? info(c.key)?.format ?? draft.format : undefined),
           pill:
             over?.pill ??
             (c.kind === 'measure' && (over?.format ?? draft.format) === 'percent' ? 'band' : undefined),
@@ -259,7 +306,7 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
         cols: [dims[1]],
         measure,
         data: result.rows,
-        format: draft.format,
+        format: draft.format ?? info(measure)?.format,
         ...draft.pivot,
       }
     }
@@ -281,18 +328,37 @@ export function draftToWidgetSpec(draft: WidgetDraft, result: QueryResultLite): 
     draft.color && result.columns.some((c) => c.key === `${draft.color}__label`)
       ? `${draft.color}__label`
       : draft.color
+  const ys = Array.isArray(y) ? y : [y]
+  const fields = [x, color, draft.y2, ...ys].filter((f): f is string => !!f)
+  const titles: Record<string, string> = {}
+  const formats: Record<string, ValueFormat> = {}
+  for (const f of fields) {
+    if (members) titles[f] = title(f)
+    const fmt = info(f)?.format
+    if (fmt && fmt !== 'date') formats[f] = fmt
+  }
+  const entities: Record<string, string> = {}
+  for (const c of result.columns) if (c.drill_entity) entities[c.key] = c.drill_entity
+  const description = ys.length === 1 ? info(ys[0])?.description : undefined
   return {
     type: 'chart',
     title: draft.title,
     w: 2,
+    ...(description ? { description } : {}),
     chart: {
       mark: draft.mark ?? 'bar',
       x,
       y,
       series: result.rows,
-      format: draft.format,
+      format: draft.format ?? (ys[0] ? info(ys[0])?.format : undefined),
       ...(color ? { color } : {}),
       ...(draft.stack === undefined ? {} : { stack: draft.stack }),
+      ...(Object.keys(titles).length ? { titles } : {}),
+      ...(Object.keys(formats).length ? { formats } : {}),
+      ...(Object.keys(entities).length ? { entities } : {}),
+      ...(draft.y2 ? { y2: draft.y2 } : {}),
+      ...(draft.target ? { target: draft.target } : {}),
+      ...(draft.height ? { height: draft.height } : {}),
     },
   }
 }

@@ -25,6 +25,27 @@ reference data by `Cube.member`.
   filters; a caller can never widen scope or read raw tables.
 - **Embeddable** — a normal crate, or run the `spyglass-server` binary.
 
+## Try it: ask your data, in the browser
+
+[`demo/`](./demo) is a report canvas with a distri analyst beside it, over a
+store dataset generated inside the browser tab. Ask "which channels convert
+best?", the analyst builds the report, click a bar to drill, ask a follow-up
+about the slice you drilled into, save it, export it.
+
+There is no server. The spyglass compiler runs as WebAssembly
+([`wasm/`](./wasm)) and DuckDB-WASM executes the SQL it produces, so the demo
+runs the same query plan and result assembly as the Postgres engine.
+
+```bash
+pnpm install
+pnpm --filter @spyglass/demo wasm   # wasm-pack + the wasm32-unknown-unknown target
+pnpm --filter @spyglass/demo dev    # http://127.0.0.1:5198 (add ?smoke for the engine self-test)
+```
+
+The analyst needs a distri workspace (`demo/.env.example`); the report,
+drilling, filters and exports work without one. How a question becomes a
+report: [`demo/HOW-IT-WORKS.md`](./demo/HOW-IT-WORKS.md).
+
 ## The cube format
 
 Spyglass models use a **Cube-style** YAML format. The term *cube* comes from
@@ -145,9 +166,24 @@ The agent skills ship in [`skills/`](./skills).
 ## Widgets & reports
 
 `@spyglassjs/ui` renders query results as **reports** — saveable, exportable docs
-of JSON widgets (`metric`, `table`, `chart`, `note`, `custom`), as embeddable
-React components. `@spyglass/studio` is the standalone editor that consumes
-them. See [web/docs/widgets.md](./web/docs/widgets.md).
+of JSON widgets (`metric`, `table`, `chart`, `pivot`, `note`, `custom`, `view`),
+as embeddable React components. `@spyglass/studio` is the standalone editor that
+consumes them. See [web/docs/widgets.md](./web/docs/widgets.md).
+
+```bash
+pnpm add @spyglassjs/ui
+```
+
+- Titles, formats and descriptions come from the model (`memberIndex(meta)`).
+- Charts drill on click and cross-filter the rest of the report, draw the
+  previous period as a dashed line, take a second axis (`y2`) and a `target`,
+  and mark an unfinished last period instead of drawing it as a drop.
+- Metrics carry a sparkline and the change as % (amounts) or points (rates).
+- Every widget sits in a `WidgetCard` with an export menu. Exporters are a
+  registry (`WidgetExporter`, `ReportExporter`): CSV of the full result, PNG,
+  JSON and Markdown are built in, and a host adds its own.
+- `buildReportTools` gives a distri agent the tools to build and edit the open
+  report from the browser.
 
 The JS packages (`ui`, `studio`, `web`) form a **pnpm workspace** rooted at the
 repo. Install once at the root, then use the workspace scripts. `pnpm dev` runs
@@ -174,9 +210,12 @@ spyglass/
   skills/             # distri agent skills (querying + authoring reports)
   ui/                 # @spyglassjs/ui — embeddable JSON-expressible widgets (React) + Storybook
   studio/             # @spyglass/studio — standalone query/editor app
+  wasm/               # spyglass-wasm — the compiler for the browser (plan + assemble)
+  demo/               # @spyglass/demo — ask-your-data demo (WASM + DuckDB + distri)
   web/                # Docusaurus docs site (docs in web/docs)
+  docs/specs/         # design notes
   package.json        # pnpm workspace root (dev / build scripts)
-  pnpm-workspace.yaml # ui + studio + web
+  pnpm-workspace.yaml # ui + studio + demo + web
   .env.sample         # DATABASE_URL + server config
 ```
 
