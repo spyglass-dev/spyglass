@@ -138,6 +138,9 @@ export function WidgetCard({ spec, children, actions, exporters = DEFAULT_WIDGET
   const body = useRef<HTMLDivElement>(null)
   const [hover, setHover] = useState(false)
   const metric = spec.type === 'metric'
+  // A note is a report's prose — a section heading, a teacher's summary — and
+  // reads as text on the page, not as one more box.
+  const prose = spec.type === 'note'
   const title = spec.title && !metric ? spec.title : undefined
   const skipped = spec.applied?.dateRangeSkipped
   const available = exporters.filter((x) => x.applies(spec))
@@ -153,6 +156,19 @@ export function WidgetCard({ spec, children, actions, exporters = DEFAULT_WIDGET
       {actions}
     </div>
   )
+  if (prose) {
+    return (
+      <div
+        style={{ position: 'relative', minWidth: 0, padding: '10px 2px 0' }}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+      >
+        <div style={{ position: 'absolute', top: 4, right: 0, zIndex: 2 }}>{controls}</div>
+        {title && <div style={{ fontSize: 15, fontWeight: 650, color: 'var(--rpt-text-strong, #111827)', marginBottom: 2 }}>{title}</div>}
+        <div ref={body}>{children}</div>
+      </div>
+    )
+  }
   return (
     <div
       style={{ ...card, padding: metric ? '14px 16px' : 16 }}

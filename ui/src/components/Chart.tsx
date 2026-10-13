@@ -124,24 +124,108 @@ const CHART_CONFIG = {
  * - `--rpt-chart-grid`     — gridlines (default `#f3f4f6`)
  * - `--rpt-chart-domain`   — axis line + ticks (default `#e5e7eb`)
  */
-function useChartConfig(): { ref: React.RefObject<HTMLDivElement | null>; config: Record<string, unknown> } {
+/** `rgb(…)` / `rgba(…)` / `#rrggbb` → the same color at `alpha`. */
+function withAlpha(color: string, alpha: number): string {
+  const rgb = color.match(/rgba?\(([^)]+)\)/)
+  if (rgb) {
+    const [r, g, b] = rgb[1].split(',').map((v) => v.trim())
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`
+  }
+  const hex = color.match(/^#([0-9a-f]{6})$/i)
+  if (hex) {
+    const n = parseInt(hex[1], 16)
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
+  }
+  return color
+}
+
+/** The chart config for a palette: series colors and the mark defaults. */
+function chartConfig(palette: readonly string[], ink?: { axisText: string; grid: string; domain: string }): Record<string, unknown> {
+  const base = CHART_CONFIG as unknown as Record<string, Record<string, unknown>>
+  return {
+    ...CHART_CONFIG,
+    bar: { ...base.bar, color: palette[0] },
+    line: { ...base.line, color: palette[0] },
+    area: { ...base.area, color: palette[0], line: { color: palette[0], strokeWidth: 2 } },
+    point: { ...base.point, color: palette[0] },
+    range: { category: [...palette] },
+    ...(ink
+      ? {
+          axis: { ...base.axis, labelColor: ink.axisText, titleColor: ink.axisText, gridColor: ink.grid, domainColor: ink.domain, tickColor: ink.domain },
+          legend: { ...base.legend, labelColor: ink.axisText, titleColor: ink.axisText },
+        }
+      : {}),
+  }
+}
+
+/**
+ * The Vega config and series palette, resolved from the host's custom
+ * properties on the chart's own container. Vega paints attribute values into
+ * SVG, where `var()` does not resolve, so every value is turned into a
+ * concrete color through a probe element first — which also resolves a
+ * host's `hsl(var(--chart-1))`. With nothing defined, the stock theme renders:
+ *
+ * - `--rpt-chart-series`   — comma-separated series colors (default the CVD palette)
+ * - `--rpt-chart-axis-text` — axis + legend labels (default `#6b7280`)
+ * - `--rpt-chart-grid`     — gridlines (default `#f3f4f6`)
+ * - `--rpt-chart-domain`   — axis line + ticks (default `#e5e7eb`)
+ */
+function useChartConfig(): {
+  ref: React.RefObject<HTMLDivElement | null>
+  config: Record<string, unknown>
+  palette: readonly string[]
+} {
   const ref = useRef<HTMLDivElement>(null)
-  const [config, setConfig] = useState<Record<string, unknown>>(CHART_CONFIG as unknown as Record<string, unknown>)
+  const [theme, setTheme] = useState<{ config: Record<string, unknown>; palette: readonly string[] }>({
+    config: CHART_CONFIG as unknown as Record<string, unknown>,
+    palette: CHART_SERIES,
+  })
   useLayoutEffect(() => {
-    if (!ref.current) return
-    const style = getComputedStyle(ref.current)
-    const read = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback
-    const axisText = read('--rpt-chart-axis-text', '#6b7280')
-    const grid = read('--rpt-chart-grid', '#f3f4f6')
-    const domain = read('--rpt-chart-domain', '#e5e7eb')
-    if (axisText === '#6b7280' && grid === '#f3f4f6' && domain === '#e5e7eb') return
-    setConfig({
-      ...CHART_CONFIG,
-      axis: { ...CHART_CONFIG.axis, labelColor: axisText, titleColor: axisText, gridColor: grid, domainColor: domain, tickColor: domain },
-      legend: { ...CHART_CONFIG.legend, labelColor: axisText, titleColor: axisText },
-    })
+    const host = ref.current
+    if (!host) return
+    const style = getComputedStyle(host)
+    const raw = (name: string) => style.getPropertyValue(name).trim()
+    const seriesRaw = raw('--rpt-chart-series')
+    const inkRaw = [raw('--rpt-chart-axis-text'), raw('--rpt-chart-grid'), raw('--rpt-chart-domain')]
+    if (!seriesRaw && inkRaw.every((v) => !v)) return
+    const probe = document.createElement('span')
+    probe.style.display = 'none'
+    host.appendChild(probe)
+    const resolve = (value: string, fallback: string) => {
+      if (!value) return fallback
+      probe.style.color = ''
+      probe.style.color = value
+      return getComputedStyle(probe).color || fallback
+    }
+    const palette = seriesRaw
+      ? splitColors(seriesRaw).map((c, i) => resolve(c, CHART_SERIES[i % CHART_SERIES.length]))
+      : CHART_SERIES
+    const ink = {
+      axisText: resolve(inkRaw[0], '#6b7280'),
+      grid: resolve(inkRaw[1], '#f3f4f6'),
+      domain: resolve(inkRaw[2], '#e5e7eb'),
+    }
+    probe.remove()
+    setTheme({ config: chartConfig(palette, ink), palette })
   }, [])
-  return { ref, config }
+  return { ref, ...theme }
+}
+
+/** Split a color list on top-level commas — `hsl(1 2% 3%), rgb(1, 2, 3)`. */
+function splitColors(list: string): string[] {
+  const out: string[] = []
+  let depth = 0
+  let cur = ''
+  for (const ch of list) {
+    if (ch === '(') depth++
+    if (ch === ')') depth--
+    if (ch === ',' && depth === 0) {
+      out.push(cur.trim())
+      cur = ''
+    } else cur += ch
+  }
+  if (cur.trim()) out.push(cur.trim())
+  return out
 }
 
 function nums(series: Record<string, unknown>[], key: string): number[] {
@@ -375,7 +459,7 @@ function highlightOpacity(field: string, highlight: unknown[] | undefined): Reco
 
 const SCHEMA = 'https://vega.github.io/schema/vega-lite/v6.json'
 
-function toVegaLite(chart: ChartSpec['chart']): VlSpec {
+function toVegaLite(chart: ChartSpec['chart'], palette: readonly string[] = CHART_SERIES): VlSpec {
   const { mark, x, stack, format } = chart
   let { y, color } = chart as { y: string | string[]; color?: string }
   // Synthesize an index field when no x is given (parity with label fallback).
@@ -586,13 +670,13 @@ function toVegaLite(chart: ChartSpec['chart']): VlSpec {
     // sitting there as a flat slab of color.
     ...(vmark === 'area' && !color
       ? {
-          line: { color: CHART_SERIES[0], strokeWidth: 2 },
+          line: { color: palette[0], strokeWidth: 2 },
           color: {
             x1: 1, y1: 1, x2: 1, y2: 0,
             gradient: 'linear',
             stops: [
-              { offset: 0, color: 'rgba(42, 120, 214, 0.02)' },
-              { offset: 1, color: 'rgba(42, 120, 214, 0.32)' },
+              { offset: 0, color: withAlpha(palette[0], 0.02) },
+              { offset: 1, color: withAlpha(palette[0], 0.32) },
             ],
           },
           opacity: 1,
@@ -634,8 +718,8 @@ function toVegaLite(chart: ChartSpec['chart']): VlSpec {
         strokeWidth: 2,
         interpolate: 'monotone',
         tooltip: true,
-        ...(color ? {} : { color: CHART_SERIES[0] }),
-        point: { filled: true, size: 26, ...(color ? {} : { color: CHART_SERIES[0] }) },
+        ...(color ? {} : { color: palette[0] }),
+        point: { filled: true, size: 26, ...(color ? {} : { color: palette[0] }) },
       },
       encoding: {
         y: { field: esc(yField), type: 'quantitative' },
@@ -655,14 +739,14 @@ function toVegaLite(chart: ChartSpec['chart']): VlSpec {
   }
   if (chart.y2) {
     layer.push({
-      mark: { type: 'line', color: CHART_SERIES[1], strokeWidth: 2, interpolate: 'monotone', point: { filled: true, size: 28, color: CHART_SERIES[1] }, tooltip: true },
+      mark: { type: 'line', color: palette[1], strokeWidth: 2, interpolate: 'monotone', point: { filled: true, size: 28, color: palette[1] }, tooltip: true },
       encoding: {
         ...overBand,
         y: {
           field: esc(chart.y2),
           type: 'quantitative',
           title: titleOf(chart, chart.y2),
-          axis: { ...valueAxis(formatOf(chart, chart.y2)), orient: 'right', grid: false, tickCount: 5, titleColor: CHART_SERIES[1] },
+          axis: { ...valueAxis(formatOf(chart, chart.y2)), orient: 'right', grid: false, tickCount: 5, titleColor: palette[1] },
         },
         tooltip,
       },
@@ -713,7 +797,7 @@ function drillFor(chart: ChartSpec['chart'], datum: Record<string, unknown> | un
 
 export function Chart({ spec, onDrill }: { spec: ChartSpec; onDrill?: (event: DrillEvent) => void }) {
   const { mark, x, y, series, max, vlSpec } = spec.chart
-  const { ref, config } = useChartConfig()
+  const { ref, config, palette } = useChartConfig()
   useLayoutEffect(ensureTooltipStyle, [])
 
   // Click a bar / slice / point to drill into that category. The handler is
@@ -746,12 +830,22 @@ export function Chart({ spec, onDrill }: { spec: ChartSpec; onDrill?: (event: Dr
   }, [vlSpec, series, config])
 
   const compiled = useMemo<VlSpec | null>(
-    () => (vlSpec || mark === 'progress' || series.length === 0 ? null : toVegaLite(spec.chart)),
-    [vlSpec, mark, series, spec.chart],
+    () => (vlSpec || mark === 'progress' || series.length === 0 ? null : toVegaLite(spec.chart, palette)),
+    [vlSpec, mark, series, spec.chart, palette],
   )
 
   if (series.length === 0 && !vlSpec) {
     return <div style={{ color: tokens.textFaint, fontSize: 13 }}>No data.</div>
+  }
+  // Every value zero: a flat line on an axis of 0.000000 says less than a
+  // sentence does. Zero is still the answer, so say it.
+  const valueKeys = [...(Array.isArray(y) ? y : [y]), spec.chart.y2].filter((k): k is string => !!k)
+  if (!vlSpec && mark !== 'progress' && valueKeys.length > 0 && series.every((r) => valueKeys.every((k) => !Number(r[k])))) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 120, color: tokens.textMuted, fontSize: 13 }}>
+        Zero across this window{valueKeys.length > 1 ? ' for every series' : ''}.
+      </div>
+    )
   }
 
   if (rawSpec) {
@@ -801,7 +895,7 @@ export function Chart({ spec, onDrill }: { spec: ChartSpec; onDrill?: (event: Dr
       {ghost && (
         <div style={{ display: 'flex', gap: 14, fontSize: 11, color: tokens.textMuted, marginBottom: 2 }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 14, height: 2, borderRadius: 2, background: CHART_SERIES[0] }} /> This period
+            <span style={{ width: 14, height: 2, borderRadius: 2, background: palette[0] }} /> This period
           </span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <span style={{ width: 14, borderTop: '2px dashed #9ca3af' }} /> Previous period
