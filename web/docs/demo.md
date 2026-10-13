@@ -17,10 +17,13 @@ ask a follow-up, then save the report or export it.
   src={require('@site/static/video/spyglass-demo.mp4').default}
   poster={require('@site/static/img/demo/video-poster.jpg').default}
   controls
-  muted
   playsInline
   style={{ width: '100%', borderRadius: 12, border: '1px solid var(--ifm-color-emphasis-300)' }}
 />
+
+Music: "Dminor (90bpm)" by Pax11, [CC0](https://freesound.org/s/443454/). The
+recipe that cuts the video from one recorded take is in
+[`demo/video/`](https://github.com/spyglass-dev/spyglass/tree/main/demo/video).
 
 ## How it runs
 
