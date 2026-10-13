@@ -19,7 +19,7 @@ them through a single endpoint, and render the results as JSON widgets.
   style={{ width: '100%', borderRadius: 12, border: '1px solid var(--ifm-color-emphasis-300)' }}
 />
 
-*One minute of the [ask-your-data demo](./demo.md), with sound: a starter report,
+*45 seconds of the [ask-your-data demo](./demo.md), with sound: a starter report,
 a channel filter applied to every widget, a question to the analyst, the report
 it builds, and the tables underneath. All of it runs in the browser tab: the spyglass
 compiler as WebAssembly, the data in DuckDB-WASM.*

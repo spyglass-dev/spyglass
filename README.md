@@ -34,7 +34,7 @@ about the slice you drilled into, save it, export it.
 
 ![The analyst built "Conversion by channel and device" from one question](./web/static/img/demo/05-analyst-report.png)
 
-A one-minute video and the full walkthrough are on the
+A 45-second video and the full walkthrough are on the
 [docs site](https://spyglass-dev.github.io/spyglass/demo).
 
 There is no server. The spyglass compiler runs as WebAssembly

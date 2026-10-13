@@ -94,7 +94,7 @@ def main() -> None:
         old.unlink()
 
     parts = [tmp / "00-title.mp4"]
-    card(parts[0], 4, mark, m["title"], m.get("subtitle", ""))
+    card(parts[0], m.get("title_seconds", 4), mark, m["title"], m.get("subtitle", ""))
     for i, c in enumerate(m["clips"], start=1):
         start = marks[c["from"]] + c.get("from_offset", 0)
         end = marks[c["to"]] + c.get("to_offset", 0)

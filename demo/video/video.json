@@ -10,12 +10,48 @@
     "credit": "\"Dminor (90bpm)\" by Pax11, CC0, https://freesound.org/s/443454/"
   },
   "clips": [
-    { "from": "overview", "to": "filter", "caption": "A store report: two years of orders, generated in the browser tab" },
-    { "from": "filter", "to": "ask", "caption": "One filter narrows every widget on the report" },
-    { "from": "ask", "to": "working", "to_offset": 1.5, "caption": "Ask a question in plain words" },
-    { "from": "working", "from_offset": 1.5, "to": "building", "speed": 3, "caption": "The analyst explores the data first (3x speed)" },
-    { "from": "building", "to": "answer", "speed": 1.5, "caption": "Then builds the report, widget by widget" },
-    { "from": "answer", "to": "data", "caption": "And states the finding in two sentences" },
-    { "from": "data", "to": "end", "caption": "Nothing leaves the tab: DuckDB and the spyglass compiler, as WebAssembly" }
-  ]
+    {
+      "from": "overview",
+      "to": "filter",
+      "caption": "A store report, generated in the browser tab",
+      "speed": 3
+    },
+    {
+      "from": "filter",
+      "to": "ask",
+      "caption": "One filter narrows every widget",
+      "speed": 2
+    },
+    {
+      "from": "ask",
+      "to": "working",
+      "to_offset": 1.5,
+      "caption": "Ask a question in plain words",
+      "speed": 1.5
+    },
+    {
+      "from": "working",
+      "from_offset": 1.5,
+      "to": "building",
+      "speed": 3,
+      "caption": "The analyst explores the data first (3x speed)"
+    },
+    {
+      "from": "building",
+      "to": "answer",
+      "speed": 1.5,
+      "caption": "Then builds the report, widget by widget"
+    },
+    {
+      "from": "answer",
+      "to": "data",
+      "caption": "And states the finding in two sentences"
+    },
+    {
+      "from": "data",
+      "to": "end",
+      "caption": "Nothing leaves the tab: DuckDB and the spyglass compiler, as WebAssembly"
+    }
+  ],
+  "title_seconds": 3
 }
