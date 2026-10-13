@@ -89,7 +89,7 @@ function InsertBar({ onClick }: { onClick?: () => void }) {
         type="button"
         onClick={onClick}
         aria-label="Add widget here"
-        className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background text-muted-foreground opacity-0 shadow-sm transition-opacity hover:border-primary hover:text-primary group-hover/insert:opacity-100"
+        className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-sm transition-opacity hover:border-primary hover:text-primary group-hover/insert:opacity-100"
       >
         <Plus className="h-3.5 w-3.5" />
       </button>
@@ -285,7 +285,7 @@ export function ReportCanvas({
           <div className="flex items-center gap-2 rounded-lg border border-amber-200/70 bg-amber-50/50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
             <TriangleAlert className="h-4 w-4 shrink-0 text-amber-500" />
             <span className="flex-1">{failed} of {widgets.length} widget{widgets.length === 1 ? '' : 's'} couldn’t load.</span>
-            <button type="button" onClick={refresh} className="inline-flex items-center gap-1.5 rounded-md border border-amber-300/70 bg-background px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100/50 dark:text-amber-200">
+            <button type="button" onClick={refresh} className="inline-flex items-center gap-1.5 rounded-md border border-amber-300/70 bg-card px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100/50 dark:text-amber-200">
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Retry
             </button>
           </div>
@@ -372,13 +372,13 @@ export function ReportCanvas({
       </div>
 
       {drawer && (
-        <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-2xl flex-col gap-3 overflow-y-auto border-l border-border bg-background p-4 shadow-2xl">
+        <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-2xl flex-col gap-3 overflow-y-auto border-l border-border bg-card p-4 shadow-2xl">
           <div className="flex items-center justify-between">
             <div className="text-sm font-semibold">{drawer.title}</div>
             <button
               type="button"
               onClick={() => setDrawer(null)}
-              className="rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+              className="rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
             >
               Close
             </button>

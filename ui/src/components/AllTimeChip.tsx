@@ -25,7 +25,13 @@ const DETAIL: Record<DateRangeSkipReason, string> = {
   widget_pinned: 'This widget pins its own date range; the report range does not apply.',
 }
 
+/** A widget that opts out on purpose (a running total) is information, not a
+ *  warning: it reads as quiet text. Only a skip nobody asked for — no time
+ *  field, an unknown cube, a pinned range — keeps the amber warning. On a
+ *  dashboard of totals the amber pill on every tile was noise that hid the
+ *  one that mattered. */
 export function AllTimeChip({ reason }: { reason: DateRangeSkipReason }) {
+  const deliberate = reason === 'opted_out'
   return (
     <span
       title={DETAIL[reason]}
@@ -34,17 +40,29 @@ export function AllTimeChip({ reason }: { reason: DateRangeSkipReason }) {
         display: 'inline-flex',
         alignItems: 'center',
         gap: 4,
-        padding: '1px 7px',
-        borderRadius: 999,
-        fontSize: 10,
-        fontWeight: 600,
-        letterSpacing: '0.02em',
         whiteSpace: 'nowrap',
-        color: tokens.warnText,
-        background: tokens.warnBg,
-        border: `1px solid ${tokens.warnBorder}`,
+        fontSize: 11,
+        fontWeight: 500,
+        ...(deliberate
+          ? { color: tokens.textFaint }
+          : {
+              padding: '1px 7px',
+              borderRadius: 999,
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+              color: tokens.warnText,
+              background: tokens.warnBg,
+              border: `1px solid ${tokens.warnBorder}`,
+            }),
       }}
     >
+      {deliberate && (
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+        </svg>
+      )}
       {LABEL[reason]}
     </span>
   )

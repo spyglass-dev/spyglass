@@ -87,7 +87,7 @@ export function ReportEmptyState({
                 type="button"
                 disabled={busy}
                 onClick={() => submit(prompt)}
-                className="rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-primary/50 hover:bg-primary/5 disabled:opacity-50"
+                className="rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:border-primary/50 hover:bg-primary/5 disabled:opacity-50"
               >
                 {label}
               </button>

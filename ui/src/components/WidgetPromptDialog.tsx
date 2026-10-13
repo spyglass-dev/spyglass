@@ -104,7 +104,7 @@ export function WidgetPromptDialog({
             : 'Describe what you want to see. It is appended to this report.'}
         </p>
 
-        <div className="mt-4 rounded-xl border border-border bg-background p-2 focus-within:border-primary/60">
+        <div className="mt-4 rounded-xl border border-border bg-card p-2 focus-within:border-primary/60">
           <textarea
             ref={inputRef}
             value={prompt}
@@ -160,7 +160,7 @@ export function WidgetPromptDialog({
                 key={s}
                 type="button"
                 onClick={() => send(s)}
-                className="rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-primary/50 hover:bg-primary/5"
+                className="rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:border-primary/50 hover:bg-primary/5"
               >
                 {s}
               </button>
