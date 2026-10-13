@@ -1,5 +1,5 @@
 {
-  "name": "@spyglass/ui",
+  "name": "@spyglassjs/ui",
   "version": "0.1.0",
   "description": "JSON-expressible reporting widgets: metric, table, chart, note + a custom-component registry. Renders a ReportDoc. Pairs with the `spyglass` engine.",
   "license": "Apache-2.0",

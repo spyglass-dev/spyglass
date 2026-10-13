@@ -1,4 +1,4 @@
-name: Release @spyglass/ui
+name: Release @spyglassjs/ui
 
 # Push a tag `ui-v<version>` matching ui/package.json to publish that version to npm.
 on:
@@ -37,7 +37,7 @@ jobs:
       # pnpm (not npm) publishes so publishConfig.exports replaces the dev-only exports map.
       # prepublishOnly builds and tests.
       - name: Publish
-        run: pnpm --filter @spyglass/ui publish --no-git-checks
+        run: pnpm --filter @spyglassjs/ui publish --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: 'true'

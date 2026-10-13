@@ -67,13 +67,13 @@ below) and drop the `/api` prefix.
 
 ## 3. The widgets (React)
 
-`@spyglass/ui` renders a `ReportDoc` (or a single `WidgetSpec`) with the standard
+`@spyglassjs/ui` renders a `ReportDoc` (or a single `WidgetSpec`) with the standard
 widgets — `metric`, `table`, `chart`, `note` — and a **custom-component
 registry**. It's presentational and dependency-light, so it drops into any React
 app:
 
 ```tsx
-import { ReportView, type ReportDoc, type WidgetRegistry } from '@spyglass/ui'
+import { ReportView, type ReportDoc, type WidgetRegistry } from '@spyglassjs/ui'
 
 const doc: ReportDoc = await fetch('/api/reports/sales/run', { method: 'POST', body: '{}' }).then(r => r.json())
 
@@ -87,7 +87,7 @@ data format**. Register them by name; `ReportView` resolves
 `{ type: 'custom', component }` against the registry:
 
 ```tsx
-import type { WidgetRegistry, CustomWidgetProps } from '@spyglass/ui'
+import type { WidgetRegistry, CustomWidgetProps } from '@spyglassjs/ui'
 
 function Leaderboard({ spec }: CustomWidgetProps) {
   // spec.data / spec.props are whatever your component declares it needs

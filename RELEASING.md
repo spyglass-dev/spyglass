@@ -1,6 +1,6 @@
 # Releasing
 
-## @spyglass/ui (npm)
+## @spyglassjs/ui (npm)
 
 1. Bump `version` in `ui/package.json` in a PR and merge it.
 2. Tag the merge commit and push the tag:
@@ -9,12 +9,12 @@
    ```
 3. `.github/workflows/release-ui.yml` checks the tag matches the package version,
    builds, tests and publishes with provenance. It needs the `NPM_TOKEN` repo secret
-   (an npm granular token with publish rights on `@spyglass/ui`).
+   (an npm granular token with publish rights on `@spyglassjs/ui`).
 
 Always publish with `pnpm`, never `npm publish`. The repo's `exports` map has a
 `development` condition pointing at `src/` so studio and Storybook get HMR; pnpm swaps
 in `publishConfig.exports` at pack time so the tarball only references `dist/`.
-Check with `cd ui && pnpm pack && tar tzf spyglass-ui-*.tgz`.
+Check with `cd ui && pnpm pack && tar tzf spyglassjs-ui-*.tgz`.
 
 ## spyglass (Rust crate)
 

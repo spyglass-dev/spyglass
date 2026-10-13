@@ -1,5 +1,5 @@
 /**
- * @spyglass/ui — JSON-expressible reporting widgets.
+ * @spyglassjs/ui — JSON-expressible reporting widgets.
  *
  * Render a `ReportDoc` (or a single `WidgetSpec`) with standard widgets
  * (metric / table / chart / note) and a custom-component registry. Pairs with

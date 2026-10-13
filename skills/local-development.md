@@ -74,9 +74,9 @@ The reporting widgets and the studio app are a pnpm workspace (`ui/`, `studio/`,
 
 ```bash
 pnpm install
-pnpm dev          # studio app (Vite) — consumes @spyglass/ui from source, live HMR
-pnpm storybook    # develop @spyglass/ui widgets in isolation (HMR)
-pnpm test         # @spyglass/ui widget tests
+pnpm dev          # studio app (Vite) — consumes @spyglassjs/ui from source, live HMR
+pnpm storybook    # develop @spyglassjs/ui widgets in isolation (HMR)
+pnpm test         # @spyglassjs/ui widget tests
 ```
 
 ## What stays in testing/

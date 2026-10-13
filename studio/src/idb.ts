@@ -1,5 +1,5 @@
 /** Minimal IndexedDB store for reports — no dependencies. */
-import type { ReportDoc } from '@spyglass/ui'
+import type { ReportDoc } from '@spyglassjs/ui'
 
 export interface StoredReport {
   id: string

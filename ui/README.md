@@ -1,4 +1,4 @@
-# @spyglass/ui
+# @spyglassjs/ui
 
 React widgets that render a Spyglass `ReportDoc`: metric, table, data grid, pivot,
 chart (Vega-Lite) and note, plus a registry for your own custom widgets. Pairs with
@@ -6,11 +6,11 @@ the [`spyglass`](https://github.com/spyglass-dev/spyglass) engine, which produce
 data these specs carry.
 
 ```sh
-pnpm add @spyglass/ui react react-dom
+pnpm add @spyglassjs/ui react react-dom
 ```
 
 ```tsx
-import { ReportView, type ReportDoc } from '@spyglass/ui'
+import { ReportView, type ReportDoc } from '@spyglassjs/ui'
 
 const doc: ReportDoc = await fetch('/api/reports/sales/run', { method: 'POST', body: '{}' }).then(r => r.json())
 
@@ -20,7 +20,7 @@ const doc: ReportDoc = await fetch('/api/reports/sales/run', { method: 'POST', b
 Layout uses Tailwind utility classes, so add the package to your Tailwind `content`:
 
 ```js
-content: ['./src/**/*.{ts,tsx}', './node_modules/@spyglass/ui/dist/**/*.js']
+content: ['./src/**/*.{ts,tsx}', './node_modules/@spyglassjs/ui/dist/**/*.js']
 ```
 
 Every color routes through `var(--rpt-*, fallback)` custom properties (`--rpt-bg`,

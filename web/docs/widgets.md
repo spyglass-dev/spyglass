@@ -6,7 +6,7 @@ sidebar_position: 7
 
 # Widgets & reports
 
-Spyglass ships an embeddable React layer (`@spyglass/ui`) for turning query results into
+Spyglass ships an embeddable React layer (`@spyglassjs/ui`) for turning query results into
 **reports** — saveable, exportable documents of data widgets. Widgets are
 **fully JSON-expressible**: a widget carries the data it renders, so a report is
 one serializable document the agent emits, the host stores, and the UI renders.
@@ -98,7 +98,7 @@ properties (`tokens` export): `--rpt-bg`, `--rpt-muted`, `--rpt-border`,
 `--rpt-accent-soft`, `--rpt-positive`, `--rpt-negative`. Define any of them on
 an ancestor to restyle the whole widget set; with none defined the stock light
 theme renders. There is no CSS to import, but layout uses Tailwind utility classes:
-add `node_modules/@spyglass/ui/dist/**/*.js` to your Tailwind `content`.
+add `node_modules/@spyglassjs/ui/dist/**/*.js` to your Tailwind `content`.
 
 ### Pivot: a missing cell is not a zero
 
@@ -355,7 +355,7 @@ The JS packages form a **pnpm workspace** rooted at the repo. From the root:
 ```bash
 pnpm install   # install ui + studio + web
 pnpm dev       # run the studio app (Vite dev server)
-pnpm storybook # develop @spyglass/ui widgets in Storybook (HMR)
+pnpm storybook # develop @spyglassjs/ui widgets in Storybook (HMR)
 pnpm build     # build every package
-pnpm test      # @spyglass/ui tests
+pnpm test      # @spyglassjs/ui tests
 ```

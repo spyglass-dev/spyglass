@@ -3,7 +3,7 @@
  * Vite dev server proxies to the running spyglass-server (no CORS). Set
  * VITE_SPYGLASS_API to call a different base directly.
  */
-import type { ReportDoc } from '@spyglass/ui'
+import type { ReportDoc } from '@spyglassjs/ui'
 
 // In the Vite dev server we call `/api/*` (proxied to spyglass-server). When the
 // app is built and embedded INTO spyglass-server it's same-origin, so the base

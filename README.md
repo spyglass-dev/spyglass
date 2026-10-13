@@ -144,23 +144,23 @@ The agent skills ship in [`skills/`](./skills).
 
 ## Widgets & reports
 
-`@spyglass/ui` renders query results as **reports** — saveable, exportable docs
+`@spyglassjs/ui` renders query results as **reports** — saveable, exportable docs
 of JSON widgets (`metric`, `table`, `chart`, `note`, `custom`), as embeddable
 React components. `@spyglass/studio` is the standalone editor that consumes
 them. See [web/docs/widgets.md](./web/docs/widgets.md).
 
 The JS packages (`ui`, `studio`, `web`) form a **pnpm workspace** rooted at the
 repo. Install once at the root, then use the workspace scripts. `pnpm dev` runs
-the studio app and consumes `@spyglass/ui` straight from source (live HMR, no
+the studio app and consumes `@spyglassjs/ui` straight from source (live HMR, no
 build step); `pnpm storybook` develops the widgets in isolation:
 
 ```bash
 pnpm install            # install all workspace packages
-pnpm dev                # run the studio app (Vite) — picks up @spyglass/ui edits live
-pnpm storybook          # develop @spyglass/ui widgets in Storybook (HMR) at localhost:6006
+pnpm dev                # run the studio app (Vite) — picks up @spyglassjs/ui edits live
+pnpm storybook          # develop @spyglassjs/ui widgets in Storybook (HMR) at localhost:6006
 pnpm dev:docs           # run the docs site (Docusaurus) at localhost:3000
 pnpm build              # build every package (ui, studio, web)
-pnpm test               # @spyglass/ui tests
+pnpm test               # @spyglassjs/ui tests
 ```
 
 ## Layout
@@ -172,7 +172,7 @@ spyglass/
   tests/              # cargo tests (pure compiler — no DB)
   examples/           # generic, domain-agnostic cube definitions
   skills/             # distri agent skills (querying + authoring reports)
-  ui/                 # @spyglass/ui — embeddable JSON-expressible widgets (React) + Storybook
+  ui/                 # @spyglassjs/ui — embeddable JSON-expressible widgets (React) + Storybook
   studio/             # @spyglass/studio — standalone query/editor app
   web/                # Docusaurus docs site (docs in web/docs)
   package.json        # pnpm workspace root (dev / build scripts)

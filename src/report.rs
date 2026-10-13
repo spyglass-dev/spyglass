@@ -1,6 +1,6 @@
 //! Bound reports — a saveable report *template* whose widgets bind to queries,
 //! plus the pure resolver that turns query results into **data-bearing** widget
-//! specs (the `ReportDoc`/`WidgetSpec` JSON that `@spyglass/ui` renders).
+//! specs (the `ReportDoc`/`WidgetSpec` JSON that `@spyglassjs/ui` renders).
 //!
 //! The agent authors a [`BoundReport`] (widgets reference `Cube.member`
 //! queries); the host runs each query under a tenant scope and calls
@@ -113,7 +113,7 @@ fn rows_as_values(result: &QueryResult) -> Vec<Value> {
 }
 
 /// Resolve one bound widget + its (optional) query result into a data-bearing
-/// `WidgetSpec` JSON object (matching `@spyglass/ui`).
+/// `WidgetSpec` JSON object (matching `@spyglassjs/ui`).
 pub fn resolve_widget(widget: &BoundWidget, result: Option<&QueryResult>) -> Value {
     let mut spec = Map::new();
     spec.insert("type".into(), json!(widget.kind));
