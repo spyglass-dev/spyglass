@@ -349,6 +349,17 @@ export function lastBucketInProgress(
   return values.find((r) => parseTimestamp(String(r[field])) === last)?.[field]
 }
 
+/** How a bucketed time axis reads: a week or a day is its date, a month is
+ *  the month. */
+const TIME_UNIT_FORMAT: Record<string, string> = {
+  yearmonthdatehours: '%b %-d %H:%M',
+  yearmonthdate: '%b %-d',
+  yearweek: '%b %-d',
+  yearmonth: '%b %Y',
+  yearquarter: 'Q%q %Y',
+  year: '%Y',
+}
+
 /** Escape dots in a field name so Vega-Lite treats it as a flat key, not a
  *  nested accessor. Our members look like `Submissions.submitted` but the row
  *  keys are flat, so an unescaped dot would look up `datum.Submissions.submitted`
@@ -629,7 +640,20 @@ function toVegaLite(chart: ChartSpec['chart'], palette: readonly string[] = CHAR
       : {}),
     // A temporal axis with more ticks than room overlaps its labels into
     // porridge. Greedy overlap removal and flat labels keep it readable.
-    ...(xt === 'temporal' ? { axis: { labelOverlap: 'greedy', labelAngle: 0, grid: false, tickCount: 6 } } : {}),
+    // Bucketed bars label as dates, not Vega's "2026 W30"; labels keep a gap
+    // so two neighbours never print as one ("Jul 26Aug 02").
+    ...(xt === 'temporal'
+      ? {
+          axis: {
+            labelOverlap: 'greedy',
+            labelSeparation: 10,
+            labelAngle: 0,
+            grid: false,
+            tickCount: 6,
+            ...(timeUnit ? { format: TIME_UNIT_FORMAT[timeUnit] ?? '%b %-d' } : {}),
+          },
+        }
+      : {}),
   }
   const yEnc: Record<string, unknown> = {
     field: esc(yField),
