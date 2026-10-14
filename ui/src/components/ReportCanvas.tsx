@@ -26,6 +26,7 @@ import { FilterBar } from './FilterBar'
 import { ReportLoading } from './ReportLoading'
 import { WidgetError } from './WidgetError'
 import { DEFAULT_REPORT_FILTERS, type FilterFacet, type ReportFilters } from '../filters'
+import { planGrid } from '../layout'
 import {
   resolveBound,
   resolveReport,
@@ -246,6 +247,59 @@ export function ReportCanvas({
   const widgets = resolved?.widgets ?? []
   const failed = widgets.filter((w) => w.type === 'custom' && (w as { component?: string }).component === 'widget_error').length
 
+  /** One widget card at index `i`, placed by `style` (see `planGrid`). */
+  const renderWidget = (i: number, style: CSSProperties) => {
+    const spec: WidgetSpec = widgets[i]
+    const source = report.widgets[i]
+    // Bound widgets edit through the host's query flow; notes edit
+    // too — a report's prose (a summary, a teacher's note) is
+    // authored content, not derived data.
+    const editable = onEditWidget && (source?.type === 'bound' || source?.type === 'note')
+    const bound = source?.type === 'bound' ? (source as BoundWidget) : undefined
+    // Exports take the WHOLE result, not the loaded page.
+    const fetchAll = bound
+      ? () =>
+          resolveBound(
+            { ...bound, query: { ...bound.query, limit: 5000, offset: undefined } },
+            { runQuery, cubeCaps, filters, drill: report.drill, members },
+          )
+      : undefined
+    const actions = (
+      <>
+        {editable && (
+          <button type="button" onClick={() => onEditWidget!(source, i)} aria-label="Edit widget" className="flex h-[26px] w-[26px] items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        )}
+        <button type="button" onClick={() => removeAt(i)} aria-label="Remove widget" className="flex h-[26px] w-[26px] items-center justify-center rounded-md text-muted-foreground hover:bg-rose-50 hover:text-rose-600">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </>
+    )
+    return (
+      <section key={spec.id ?? i} style={style} className="relative">
+        <WidgetCard spec={spec} actions={actions} exporters={exporters} fetchAll={fetchAll} stale={loading}>
+          {/* One widget with a shape nothing validated must not
+              unmount the report. A two-measure line chart did exactly
+              that and left a white screen. */}
+          <WidgetBoundary title={(spec as { title?: string }).title}>
+            <Widget
+              spec={spec}
+              registry={mergedRegistry}
+              views={views}
+              filters={filters}
+              framed
+              onGridQuery={source?.type === 'bound' ? gridQueryAt(i) : undefined}
+              onDrill={source?.type === 'bound' || source?.type === 'view' ? onDrill : undefined}
+              onMeasureClick={source?.type === 'bound' ? measureClickAt(i) : undefined}
+              onRefresh={refresh}
+            />
+          </WidgetBoundary>
+        </WidgetCard>
+      </section>
+    )
+  }
+
   return (
     <div className="flex flex-col">
       {/* The bar also carries the drill trail, so it must render for a report
@@ -302,60 +356,20 @@ export function ReportCanvas({
             ))}
           </div>
         ) : (
-          // `dense` packs a narrow widget into the hole a wide one left, so an
-          // agent's widths never leave a gap in the middle of the report.
-          <div className="grid grid-cols-4 gap-4" style={{ gridAutoFlow: 'row dense' }}>
+          // `planGrid` lays the widgets out: metrics beside a chart stack, and a
+          // short row fills, so the agent's widths never leave a gap or a
+          // stretched, empty tile.
+          <div className="grid grid-cols-4 gap-4">
             <InsertBar onClick={onAddWidget} />
-            {widgets.map((spec: WidgetSpec, i) => {
-              const source = report.widgets[i]
-              // Bound widgets edit through the host's query flow; notes edit
-              // too — a report's prose (a summary, a teacher's note) is
-              // authored content, not derived data.
-              const editable = onEditWidget && (source?.type === 'bound' || source?.type === 'note')
-              const bound = source?.type === 'bound' ? (source as BoundWidget) : undefined
-              // Exports take the WHOLE result, not the loaded page.
-              const fetchAll = bound
-                ? () =>
-                    resolveBound(
-                      { ...bound, query: { ...bound.query, limit: 5000, offset: undefined } },
-                      { runQuery, cubeCaps, filters, drill: report.drill, members },
-                    )
-                : undefined
-              const actions = (
-                <>
-                  {editable && (
-                    <button type="button" onClick={() => onEditWidget!(source, i)} aria-label="Edit widget" className="flex h-[26px] w-[26px] items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                  <button type="button" onClick={() => removeAt(i)} aria-label="Remove widget" className="flex h-[26px] w-[26px] items-center justify-center rounded-md text-muted-foreground hover:bg-rose-50 hover:text-rose-600">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </>
-              )
-              return (
-                <section key={spec.id ?? i} style={span(spec.w)} className="relative">
-                  <WidgetCard spec={spec} actions={actions} exporters={exporters} fetchAll={fetchAll} stale={loading}>
-                    {/* One widget with a shape nothing validated must not
-                        unmount the report. A two-measure line chart did exactly
-                        that and left a white screen. */}
-                    <WidgetBoundary title={(spec as { title?: string }).title}>
-                      <Widget
-                        spec={spec}
-                        registry={mergedRegistry}
-                        views={views}
-                        filters={filters}
-                        framed
-                        onGridQuery={source?.type === 'bound' ? gridQueryAt(i) : undefined}
-                        onDrill={source?.type === 'bound' || source?.type === 'view' ? onDrill : undefined}
-                        onMeasureClick={source?.type === 'bound' ? measureClickAt(i) : undefined}
-                        onRefresh={refresh}
-                      />
-                    </WidgetBoundary>
-                  </WidgetCard>
-                </section>
-              )
-            })}
+            {planGrid(widgets.map((w) => ({ w: w.w, metric: w.type === 'metric' }))).map((cell) =>
+              cell.kind === 'stack' ? (
+                <div key={`stack-${cell.indices[0]}`} style={span(cell.w)} className="flex min-w-0 flex-col gap-4">
+                  {cell.indices.map((i) => renderWidget(i, { flex: 1, minWidth: 0 }))}
+                </div>
+              ) : (
+                renderWidget(cell.index, { ...span(cell.w), ...(cell.compact ? { alignSelf: 'start' } : {}) })
+              ),
+            )}
             {onAddWidget && (
               <button type="button" onClick={onAddWidget} style={span(4)} className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-border py-6 text-sm font-medium text-muted-foreground transition-colors hover:border-primary/60 hover:bg-primary/5 hover:text-primary">
                 <Plus className="h-4 w-4" /> Add widget
