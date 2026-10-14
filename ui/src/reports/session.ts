@@ -40,6 +40,9 @@ export interface WidgetOutcome {
   /** First few rows: the shape, not the data. */
   sample?: Record<string, unknown>[]
   error?: string
+  /** Why an `empty` widget is empty when it did return rows — e.g. every
+   *  value is zero in the report's window. */
+  note?: string
   /** What the framework applied ON TOP of the query — the commonest reason a
    *  widget an agent believes is correct comes back empty. */
   applied?: { facets?: string[]; dateField?: string | null }
@@ -203,6 +206,7 @@ export function compactState(state: ReportSessionState): ReportSessionState {
         status: w.outcome.status,
         ...(w.outcome.row_count !== undefined ? { row_count: w.outcome.row_count } : {}),
         ...(w.outcome.error ? { error: w.outcome.error } : {}),
+        ...(w.outcome.note ? { note: w.outcome.note } : {}),
       },
     })),
   }

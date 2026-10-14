@@ -35,6 +35,27 @@ function rowsOf(spec: WidgetSpec): number | null {
   }
 }
 
+/**
+ * True when a chart or pivot has rows but every plotted value is zero. The
+ * canvas says "Zero across this window" for it; for the agent it is as empty as
+ * no rows, and usually the same bug (a filter or window the data is not in). A
+ * metric of 0 is a real answer and is not judged here.
+ */
+function allZero(spec: WidgetSpec): boolean {
+  if (spec.type === 'chart') {
+    const ys = [...(Array.isArray(spec.chart.y) ? spec.chart.y : [spec.chart.y]), spec.chart.y2].filter(
+      (k): k is string => !!k,
+    )
+    const series = spec.chart.series ?? []
+    return ys.length > 0 && series.length > 0 && series.every((r) => ys.every((k) => !Number(r[k])))
+  }
+  if (spec.type === 'pivot') {
+    const data = spec.data ?? []
+    return data.length > 0 && data.every((r) => !Number(r[spec.measure]))
+  }
+  return false
+}
+
 /** The error a failed widget resolves into (`widget_error`), if it is one. */
 function errorOf(spec: WidgetSpec): string | null {
   if (spec.type === 'custom' && spec.component === 'widget_error') {
@@ -116,9 +137,11 @@ export function outcomesFrom({ source, resolved, filters, cubeCaps }: OutcomeInp
       out.set(id, { status: 'ok' })
       return
     }
+    const zero = rows > 0 && allZero(spec)
     out.set(id, {
-      status: rows === 0 ? 'empty' : 'ok',
+      status: rows === 0 || zero ? 'empty' : 'ok',
       row_count: rows,
+      ...(zero ? { note: 'every value is zero in the report window' } : {}),
       ...(rows > 0 ? { sample: sampleOf(spec) } : {}),
       ...(applied ? { applied } : {}),
     })

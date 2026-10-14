@@ -14,6 +14,7 @@ import type { AgentTool, ReportHost, ToolContext } from '../distri'
 import { isReportWidget, stateOf, validateWidgetQueries, withProvenance } from '../distri'
 import { FILTER_SPEC_SCHEMA, validateFilterSpec } from '../report.schema'
 import { checkFacetKeys, warnBakedDateRange } from './guards'
+import { forgetProbes, needsFix, probeWidgets } from './probe'
 import { resolveWidget, widgetId, withWidgetIds } from './session'
 import type { FacetSpec, Report, ReportWidget } from '../report'
 
@@ -42,6 +43,32 @@ const NOTHING_OPEN = {
     'No report is open, so there is nothing to change. If they asked for a NEW report, use ' +
     'create_report; otherwise open one first.',
   state: { status: 'none' as const },
+}
+
+/**
+ * Apply an agent's facet selection and window to the report's filters. A value
+ * for a facet the report does not declare is refused: the bar would have no
+ * control for it, so the reader could never see or undo it.
+ */
+export function mergeSelection(
+  current: Report['filters'],
+  selected: Record<string, string[]> | undefined,
+  datePreset: string | undefined,
+  facets: FacetSpec[] | undefined,
+): { value: NonNullable<Report['filters']> } | { error: string } {
+  const next: NonNullable<Report['filters']> = { ...(current ?? {}) }
+  if (selected) {
+    const declared = new Set((facets ?? []).map((f) => f.key))
+    const unknown = Object.keys(selected).filter((k) => !declared.has(k))
+    if (unknown.length) {
+      return {
+        error: `No facet ${unknown.map((k) => `"${k}"`).join(', ')} on this report. Declare it in \`facets\` first, or filter the widgets instead.`,
+      }
+    }
+    next.facets = { ...(next.facets ?? {}), ...Object.fromEntries(Object.entries(selected).map(([k, v]) => [k, (v ?? []).map(String)])) }
+  }
+  if (datePreset) next.datePreset = datePreset as NonNullable<Report['filters']>['datePreset']
+  return { value: next }
 }
 
 /** `get_report` — look at what is on screen before changing it. */
@@ -112,7 +139,16 @@ export function editWidgetTool(host: ReportHost, ctx: ToolContext = {}): AgentTo
         idx === found.index ? ({ ...replacement, id: keepId } as ReportWidget) : w,
       )
       host.setReport({ ...open.report, widgets })
-      return ok({ ok: true, id: keepId, ...(warning ? { warning } : {}), state: stateOf(host) })
+      let checked = {}
+      if (keepId) {
+        forgetProbes(host, [keepId])
+        if (ctx.runQuery) {
+          const placed = widgets[found.index]
+          const outcomes = await probeWidgets(host, [placed], ctx)
+          checked = needsFix(outcomes, new Map([[keepId, (placed as { title?: string }).title]])) ?? {}
+        }
+      }
+      return ok({ ok: true, id: keepId, ...(warning ? { warning } : {}), ...checked, state: stateOf(host) })
     },
   }
 }
@@ -135,8 +171,10 @@ export function removeWidgetTool(host: ReportHost): AgentTool {
       if (!open) return ok(NOTHING_OPEN)
       const found = resolveWidget(open.widgets, (input ?? {}) as { id?: string; index?: number })
       if ('error' in found) return ok({ ok: false, error: found.error, state: stateOf(host) })
+      const removedId = widgetId(open.widgets[found.index])
       const widgets = open.widgets.filter((_, idx) => idx !== found.index)
       host.setReport({ ...open.report, widgets })
+      if (removedId) forgetProbes(host, [removedId])
       return ok({ ok: true, state: stateOf(host) })
     },
   }
@@ -194,26 +232,42 @@ export function setReportFiltersTool(host: ReportHost, ctx: ToolContext = {}): A
     autoExecute: true,
     name: 'set_report_filters',
     description:
-      'Declare the filter bar for the OPEN report — which filters it offers and which are mandatory. Use for "add a filter for X", "make it filterable by X", "scope this to X". A facet is a DECLARATION: { key, label, required?, single?, source?, options? }, where `key` is a dimension the reader picks a VALUE of — class_id, status, student_id. NEVER a time dimension: every report already has a date range, and a facet over a date can only be an empty menu. Prefer this over baking a filter into widget queries. Replaces the whole spec, so include every facet you want kept.',
+      'Change the filter bar of the OPEN report. Two things, either or both: `facets` DECLARES which filters it offers and which are mandatory ({ key, label, required?, single?, source?, options? }, `key` a dimension the reader picks a VALUE of: class_id, status, student_id, workspace_id; NEVER a time dimension; replaces the whole spec, so include every facet you want kept). `selected` PICKS values for declared facets, e.g. { "class_id": ["<id>"] } to point the report at a tagged class; `datePreset` picks the window ("last_7d", "last_30d", "last_90d", "this_month", "this_year", "all"). Prefer this over baking a filter into widget queries.',
     parameters: {
       type: 'object',
       additionalProperties: false,
-      properties: { facets: FILTER_SPEC_SCHEMA },
-      required: ['facets'],
+      properties: {
+        facets: FILTER_SPEC_SCHEMA,
+        selected: {
+          type: 'object',
+          additionalProperties: { type: 'array', items: { type: 'string' } },
+          description: 'Facet key → the values to select, e.g. { "class_id": ["…"] }.',
+        },
+        datePreset: { type: 'string', description: 'The report window preset.' },
+      },
     },
     handler: async (input) => {
       const report = host.getReport()
       if (!report) return ok(NOTHING_OPEN)
-      const facets = (input as { facets?: unknown })?.facets
-      const v = validateFilterSpec(facets)
-      if (!v.valid) {
-        const detail = v.errors.map((e) => `${e.path} ${e.message}`).join('; ')
-        return ok({ ok: false, error: `Invalid facets: ${detail}` })
+      const a = (input ?? {}) as { facets?: unknown; selected?: Record<string, string[]>; datePreset?: string }
+      if (a.facets === undefined && !a.selected && !a.datePreset) {
+        return ok({ ok: false, error: 'Pass `facets` to declare filters, `selected` to pick values, or `datePreset`.' })
       }
-      const badKey = checkFacetKeys(facets as FacetSpec[], ctx.meta)
-      if (badKey) return ok({ ok: false, error: badKey })
-      host.setReport({ ...report, facets: facets as FacetSpec[] })
-      return ok({ ok: true, facets: (facets as FacetSpec[]).map((f) => f.key), state: stateOf(host) })
+      let facets = report.facets as FacetSpec[] | undefined
+      if (a.facets !== undefined) {
+        const v = validateFilterSpec(a.facets)
+        if (!v.valid) {
+          const detail = v.errors.map((e) => `${e.path} ${e.message}`).join('; ')
+          return ok({ ok: false, error: `Invalid facets: ${detail}` })
+        }
+        const badKey = checkFacetKeys(a.facets as FacetSpec[], ctx.meta)
+        if (badKey) return ok({ ok: false, error: badKey })
+        facets = a.facets as FacetSpec[]
+      }
+      const filters = mergeSelection(report.filters, a.selected, a.datePreset, facets)
+      if ('error' in filters) return ok({ ok: false, error: filters.error })
+      host.setReport({ ...report, ...(facets ? { facets } : {}), filters: filters.value })
+      return ok({ ok: true, facets: (facets ?? []).map((f) => f.key), filters: filters.value, state: stateOf(host) })
     },
   }
 }

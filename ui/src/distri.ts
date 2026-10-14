@@ -5,7 +5,8 @@
  * `ReportHost` (open/update the report it's showing) and pairs these with a
  * reporting skill (see `spyglass/skills/reporting`).
  */
-import type { BoundWidget, Report, ReportWidget, ViewWidget } from './report'
+import type { BoundWidget, CubeCapsMap, Report, ReportWidget, ViewWidget } from './report'
+import type { MemberIndex } from './members'
 import { normalizeQuery, type CubeModelMeta, type QueryResultLite, type WidgetQuery } from './querybuilder'
 import { validateQuery } from './validate'
 import type { ViewRegistry } from './views'
@@ -13,6 +14,7 @@ import type { FacetSpec } from './report'
 import { FILTER_SPEC_SCHEMA, validateFilterSpec } from './report.schema'
 import { findReferenceQueriesTool, type ExampleIndex } from './reports/references'
 import { checkFacetKeys, warnBakedDateRange } from './reports/guards'
+import { forgetProbes, needsFix, probeOutcomes, probeWidgets } from './reports/probe'
 import {
   findDuplicate,
   newWidgetId,
@@ -24,6 +26,7 @@ import {
   type WidgetOutcome,
 } from './reports/session'
 import {
+  mergeSelection,
   editWidgetTool,
   getReportTool,
   moveWidgetTool,
@@ -121,6 +124,12 @@ const ok = (data: unknown) => [{ part_type: 'data' as const, data }]
 export interface ToolContext {
   meta?: CubeModelMeta
   runQuery?: (query: WidgetQuery) => Promise<QueryResultLite>
+  /** Which report filters reach which cube — the same caps the canvas uses.
+   *  With it, the check-run a build or edit does applies the report's date
+   *  window and facets exactly as the canvas will. */
+  cubeCaps?: CubeCapsMap
+  /** The model's titles and formats, for check-run results that read right. */
+  members?: MemberIndex
   /** Host view registry — enables `add_report_view`, validated against each
    *  view's manifest. */
   views?: ViewRegistry
@@ -156,6 +165,18 @@ export function withProvenance(widgets: ReportWidget[], prompt: string | undefin
   })
 }
 
+/**
+ * Check-run the widgets a tool just placed and return the fields its result
+ * carries: nothing when they all work, `needs_fix` + `next` when any failed or
+ * came back empty. No runner, no check-run — the canvas outcomes still apply.
+ */
+async function checkPlaced(host: ReportHost, ctx: ToolContext, placed: ReportWidget[]) {
+  if (!ctx.runQuery || !placed.length) return {}
+  const outcomes = await probeWidgets(host, placed, ctx)
+  const titles = new Map(placed.map((w) => [widgetId(w) ?? '', (w as { title?: string; label?: string }).title ?? (w as { label?: string }).label]))
+  return needsFix(outcomes, titles) ?? {}
+}
+
 /** `create_report` — build a report from a title + widgets and open it. */
 export function createReportTool(
   host: ReportHost,
@@ -172,6 +193,24 @@ export function createReportTool(
         "OPTIONAL declared filters for this report — what the filter bar offers and which are mandatory. Omit to use the host's default spec. Override only when the report needs a DIFFERENT scope. Do NOT bake facet filters into widget queries; the facets apply them.",
     },
     prompt: { type: 'string', description: "The user's ask, verbatim (stored as provenance)." },
+    filters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        facets: {
+          type: 'object',
+          additionalProperties: { type: 'array', items: { type: 'string' } },
+          description: 'Facet key → values to select when the report opens, e.g. { "class_id": ["<id of a tagged class>"] }.',
+        },
+        datePreset: { type: 'string', description: 'The window the report opens on: last_7d, last_30d, last_90d, this_month, this_year, all.' },
+      },
+      description: 'OPTIONAL initial filter selection. Use it to point the report at a tagged entity through its facet instead of baking the id into every widget.',
+    },
+    new_report: {
+      type: 'boolean',
+      description:
+        'Set true ONLY when the user explicitly asked for a NEW, separate report while one is open. Without it, create_report refuses to replace an open report: change that one with the edit tools instead.',
+    },
   }
   if (config.entityReport) {
     properties.entity = {
@@ -203,8 +242,24 @@ export function createReportTool(
           facets?: unknown
           entity?: { kind?: string; id?: string }
           prompt?: string
+          new_report?: boolean
+          filters?: { facets?: Record<string, string[]>; datePreset?: string }
         }
         const title = a.title?.trim() || 'Untitled report'
+
+        // A follow-up is an edit. Replacing the open report is how "add a chart
+        // to this" turned into a second report and lost the first one's edits.
+        const open = host.getReport()
+        if (open && (open.widgets?.length ?? 0) > 0 && !a.new_report) {
+          return ok({
+            ok: false,
+            error:
+              `A report is already open ("${open.title}", ${open.widgets.length} widgets). Change it with ` +
+              'add_report_widget / edit_report_widget / remove_report_widget / set_report_filters / rename_report. ' +
+              'Only if the user asked for a NEW, separate report, call create_report again with new_report: true.',
+            state: stateOf(host),
+          })
+        }
 
         // Declared filters: the agent's override (validated against the filter
         // spec schema), else the host's default. A report with neither cannot
@@ -249,6 +304,11 @@ export function createReportTool(
           })
         }
         if (facets) report.facets = facets
+        if (a.filters) {
+          const sel = mergeSelection(report.filters, a.filters.facets, a.filters.datePreset, report.facets as FacetSpec[] | undefined)
+          if ('error' in sel) return ok({ ok: false, error: sel.error })
+          report.filters = sel.value
+        }
 
         // Persist BEFORE opening when the host stores reports: the agent's
         // reply carries a route, and a route to a report that was never saved
@@ -260,9 +320,12 @@ export function createReportTool(
         }
         host.setReport(report)
         host.onBuilt?.(report, id)
+        const checked = await checkPlaced(host, ctx, report.widgets)
         return ok({
           ok: true,
           widget_count: report.widgets.length,
+          ...(id ? {} : { saved: false, note: 'Opened as an UNSAVED draft. The user saves it; say it is not saved yet.' }),
+          ...checked,
           ...(id && config.reportPath ? { navigate_to: config.reportPath(id) } : {}),
           ...(warning ? { warning } : {}),
           // The state it produced — including whether each widget returned
@@ -323,7 +386,9 @@ export function addWidgetTool(host: ReportHost, ctx: ToolContext = {}): AgentToo
         }
         widgets[at] = { ...incoming, id: a.id } as ReportWidget
         host.setReport({ ...current, widgets })
-        return ok({ ok: true, action: 'replaced', id: a.id, ...(warning ? { warning } : {}), state: stateOf(host) })
+        forgetProbes(host, [a.id])
+        const checked = await checkPlaced(host, ctx, [widgets[at]])
+        return ok({ ok: true, action: 'replaced', id: a.id, ...(warning ? { warning } : {}), ...checked, state: stateOf(host) })
       }
 
       // Already there? Say so and change nothing, rather than a second copy.
@@ -342,7 +407,8 @@ export function addWidgetTool(host: ReportHost, ctx: ToolContext = {}): AgentToo
       const at = typeof a.index === 'number' ? Math.max(0, Math.min(a.index, widgets.length)) : widgets.length
       widgets.splice(at, 0, { ...incoming, id } as ReportWidget)
       host.setReport({ ...current, widgets })
-      return ok({ ok: true, action: 'added', id, ...(warning ? { warning } : {}), state: stateOf(host) })
+      const checked = await checkPlaced(host, ctx, [widgets[at]])
+      return ok({ ok: true, action: 'added', id, ...(warning ? { warning } : {}), ...checked, state: stateOf(host) })
     },
   }
 }
@@ -488,9 +554,25 @@ export function stateOf(host: ReportHost, detail: 'full' | 'compact' = 'compact'
   const state = sessionState({
     report: host.getReport(),
     savedId: host.getSavedId?.() ?? null,
-    outcomes: host.getOutcomes?.(),
+    outcomes: mergedOutcomes(host),
   })
   return detail === 'full' ? state : compactState(state)
+}
+
+/**
+ * Canvas outcomes first (they ran with the report's filters applied), then the
+ * tools' own check-runs for anything the canvas has not drawn yet.
+ */
+function mergedOutcomes(host: ReportHost): Map<string, WidgetOutcome> {
+  const merged = new Map(probeOutcomes(host))
+  const canvas = host.getOutcomes?.()
+  if (canvas) {
+    const entries = canvas instanceof Map ? [...canvas.entries()] : Object.entries(canvas)
+    for (const [id, o] of entries) {
+      if (o && o.status !== 'unresolved' && o.status !== 'loading') merged.set(id, o)
+    }
+  }
+  return merged
 }
 
 /** Cubes the open report already queries — context for example ranking. */

@@ -173,6 +173,7 @@ describe('create_report', () => {
       title: 'B',
       widgets: [widget('x')],
       facets: [{ key: 'student_id', label: 'Student', required: true, single: true }],
+      new_report: true,
     })
     expect(state.report!.facets).toEqual([
       { key: 'student_id', label: 'Student', required: true, single: true },

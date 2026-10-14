@@ -49,6 +49,27 @@ impl Model {
                 None => cube.dimensions.contains_key(member),
             }
         };
+        // An example is only useful while every member it names exists.
+        let declared = |member: &str| -> bool {
+            member.split_once('.').is_some_and(|(c, field)| {
+                self.cube(c).is_some_and(|cb| {
+                    cb.measures.contains_key(field) || cb.dimensions.contains_key(field) || cb.segments.contains_key(field)
+                })
+            })
+        };
+        for (name, cube) in &self.cubes {
+            for (i, example) in cube.examples.iter().enumerate() {
+                let id = example.get("id").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+                if example.get("query").is_none() {
+                    problems.push(format!("cube {name}: example #{i} ({id}) has no query"));
+                }
+                for member in example_members(example) {
+                    if !declared(&member) {
+                        problems.push(format!("cube {name}: example {id} names unknown member {member}"));
+                    }
+                }
+            }
+        }
         for (name, cube) in &self.cubes {
             for target in cube.joins.keys() {
                 if self.cube(target).is_none() {
@@ -197,6 +218,41 @@ pub struct Cube {
     /// definitions so they stop being re-derived per report.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub segments: BTreeMap<String, Segment>,
+    /// Worked examples of this cube's use — `{ id, asks: [...], query, means?,
+    /// widget? }` — carried to `/meta` unchanged so an agent can start from a
+    /// vetted query instead of composing one from member names. The shape is
+    /// owned by the UI's reference-query index (`@spyglassjs/ui`
+    /// `buildExampleIndex`); the engine only checks that every member an
+    /// example names exists, so an example cannot drift from the model.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub examples: Vec<serde_json::Value>,
+    /// Plausible-but-wrong member choices with the right one beside them
+    /// (`{ ask, wrong, right, why }`), carried to `/meta` the same way.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anti_examples: Vec<serde_json::Value>,
+}
+
+/// Every `Cube.member` an example's query names: measures, dimensions, time
+/// dimensions, filter members, order members and segments.
+pub fn example_members(example: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    let Some(q) = example.get("query") else {
+        return out;
+    };
+    let strings = |key: &str, out: &mut Vec<String>| {
+        if let Some(arr) = q.get(key).and_then(|v| v.as_array()) {
+            out.extend(arr.iter().filter_map(|v| v.as_str().map(str::to_string)));
+        }
+    };
+    strings("measures", &mut out);
+    strings("dimensions", &mut out);
+    strings("segments", &mut out);
+    for (key, field) in [("timeDimensions", "dimension"), ("filters", "member"), ("order", "member")] {
+        if let Some(arr) = q.get(key).and_then(|v| v.as_array()) {
+            out.extend(arr.iter().filter_map(|v| v.get(field).and_then(|m| m.as_str()).map(str::to_string)));
+        }
+    }
+    out
 }
 
 /// A named predicate on a cube's rows. `${CUBE}` (or any `${CubeName}`)

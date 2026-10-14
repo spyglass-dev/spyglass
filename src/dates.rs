@@ -163,9 +163,68 @@ pub fn resolve_date_range(
     tz: Tz,
 ) -> Result<(String, String), String> {
     match range {
-        crate::query::DateRange::Absolute([from, to]) => Ok((from.clone(), to.clone())),
+        crate::query::DateRange::Absolute([from, to]) => Ok((
+            resolve_endpoint(from, now, tz)?,
+            resolve_endpoint(to, now, tz)?,
+        )),
         crate::query::DateRange::Relative(spec) => resolve_relative(spec, now, tz),
     }
+}
+
+/// One end of an absolute `[from, to)` pair.
+///
+/// A date or timestamp passes through unchanged. A relative point — `today`,
+/// `yesterday`, `now`, `N days ago` (also weeks, months, quarters, years) —
+/// resolves to the start of that day in `tz`, so `["60 days ago", "30 days
+/// ago"]` means what it says. Anything else is a `BadDateRange` the caller
+/// sees as a 400, instead of a string Postgres refuses to cast and the caller
+/// sees as a 500.
+pub fn resolve_endpoint(value: &str, now: DateTime<Utc>, tz: Tz) -> Result<String, String> {
+    let v = value.trim();
+    if NaiveDate::parse_from_str(v, "%Y-%m-%d").is_ok()
+        || DateTime::parse_from_rfc3339(v).is_ok()
+        || chrono::NaiveDateTime::parse_from_str(v, "%Y-%m-%d %H:%M:%S").is_ok()
+        || chrono::NaiveDateTime::parse_from_str(v, "%Y-%m-%dT%H:%M:%S").is_ok()
+    {
+        return Ok(v.to_string());
+    }
+    let today = now.with_timezone(&tz).date_naive();
+    let words: Vec<String> = v.to_lowercase().replace('_', " ").split_whitespace().map(str::to_string).collect();
+    let words: Vec<&str> = words.iter().map(String::as_str).collect();
+    let day = match words.as_slice() {
+        ["now"] => return Ok(now.to_rfc3339()),
+        ["today"] => today,
+        ["tomorrow"] => today + Duration::days(1),
+        ["yesterday"] => today - Duration::days(1),
+        [n, unit, "ago"] => {
+            let n: i32 = n.parse().map_err(|_| bad_endpoint(value))?;
+            let unit = parse_unit(unit).ok_or_else(|| bad_endpoint(value))?;
+            match unit {
+                Unit::Day => today - Duration::days(n as i64),
+                Unit::Week => today - Duration::weeks(n as i64),
+                Unit::Month | Unit::Quarter | Unit::Year => {
+                    let months = match unit {
+                        Unit::Month => n,
+                        Unit::Quarter => 3 * n,
+                        _ => 12 * n,
+                    };
+                    today
+                        .checked_sub_months(chrono::Months::new(months.max(0) as u32))
+                        .ok_or_else(|| bad_endpoint(value))?
+                }
+            }
+        }
+        _ => return Err(bad_endpoint(value)),
+    };
+    Ok(day_to_utc(day, tz))
+}
+
+fn bad_endpoint(value: &str) -> String {
+    format!(
+        "dateRange endpoint {value:?} is not a date (YYYY-MM-DD), a timestamp, or a relative point \
+         (today, yesterday, now, \"N days ago\"). For a moving window use a relative range such as \
+         \"last 30 days\", and compare windows with `compare` instead of a second pinned range."
+    )
 }
 
 /// The comparison window for a resolved `[from, to)`: `previous_period`
@@ -376,5 +435,37 @@ mod tests {
             "Europe/London"
         );
         assert!(parse_tz(Some("Mars/Olympus")).is_err());
+    }
+
+    use crate::query::DateRange;
+
+
+    fn now() -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-10-14T09:30:00Z").unwrap().with_timezone(&Utc)
+    }
+
+    #[test]
+    fn absolute_dates_pass_through() {
+        let r = DateRange::Absolute(["2026-01-01".into(), "2026-02-01".into()]);
+        assert_eq!(resolve_date_range(&r, now(), chrono_tz::UTC).unwrap(), ("2026-01-01".into(), "2026-02-01".into()));
+    }
+
+    #[test]
+    fn relative_endpoints_resolve_to_day_starts() {
+        let r = DateRange::Absolute(["60 days ago".into(), "30 days ago".into()]);
+        let (from, to) = resolve_date_range(&r, now(), chrono_tz::UTC).unwrap();
+        assert!(from.starts_with("2026-08-15"), "{from}");
+        assert!(to.starts_with("2026-09-14"), "{to}");
+        let r = DateRange::Absolute(["3 months ago".into(), "today".into()]);
+        let (from, to) = resolve_date_range(&r, now(), chrono_tz::UTC).unwrap();
+        assert!(from.starts_with("2026-07-14"), "{from}");
+        assert!(to.starts_with("2026-10-14"), "{to}");
+    }
+
+    #[test]
+    fn garbage_endpoints_are_a_bad_date_range() {
+        let r = DateRange::Absolute(["last tuesday-ish".into(), "today".into()]);
+        let err = resolve_date_range(&r, now(), chrono_tz::UTC).unwrap_err();
+        assert!(err.contains("not a date"), "{err}");
     }
 }

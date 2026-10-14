@@ -1,6 +1,6 @@
 [package]
 name = "spyglass"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Spyglass — a pluggable semantic layer: Cube-style model, SQL compiler, single query endpoint. Postgres by default."
 license = "Apache-2.0"
