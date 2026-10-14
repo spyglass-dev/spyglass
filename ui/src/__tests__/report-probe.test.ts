@@ -163,3 +163,32 @@ describe('withRetry', () => {
     expect(isTransientError(new Error('Unknown member Foo.bar'))).toBe(false)
   })
 })
+
+describe('filter selection', () => {
+  const facets = [{ key: 'class_id', label: 'Class', single: true }]
+  it('create_report opens on the selected facet value', async () => {
+    const { host, state } = makeHost()
+    const out = await call(byName(buildReportTools(host, { runQuery }, { defaultFacets: facets as never }), 'create_report'), {
+      title: 'T',
+      widgets: [bound('Good.count', 'G')],
+      filters: { facets: { class_id: ['c-1'] }, datePreset: 'last_30d' },
+    })
+    expect(out.ok).toBe(true)
+    expect(state.report?.filters).toEqual({ facets: { class_id: ['c-1'] }, datePreset: 'last_30d' })
+  })
+
+  it('set_report_filters picks a value without redeclaring the spec', async () => {
+    const { host, state } = makeHost({ title: 'R', widgets: [bound('Good.count', 'G')], facets } as unknown as Report)
+    const out = await call(byName(buildReportTools(host, { runQuery }), 'set_report_filters'), { selected: { class_id: ['c-2'] } })
+    expect(out.ok).toBe(true)
+    expect(state.report?.filters?.facets).toEqual({ class_id: ['c-2'] })
+    expect(state.report?.facets).toEqual(facets)
+  })
+
+  it('refuses a value for a facet the report does not declare', async () => {
+    const { host } = makeHost({ title: 'R', widgets: [bound('Good.count', 'G')], facets } as unknown as Report)
+    const out = await call(byName(buildReportTools(host, { runQuery }), 'set_report_filters'), { selected: { student_id: ['s'] } })
+    expect(out.ok).toBe(false)
+    expect(out.error).toMatch(/No facet "student_id"/)
+  })
+})

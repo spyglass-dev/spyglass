@@ -25,6 +25,7 @@ import {
   type WidgetOutcome,
 } from './reports/session'
 import {
+  mergeSelection,
   editWidgetTool,
   getReportTool,
   moveWidgetTool,
@@ -185,6 +186,19 @@ export function createReportTool(
         "OPTIONAL declared filters for this report — what the filter bar offers and which are mandatory. Omit to use the host's default spec. Override only when the report needs a DIFFERENT scope. Do NOT bake facet filters into widget queries; the facets apply them.",
     },
     prompt: { type: 'string', description: "The user's ask, verbatim (stored as provenance)." },
+    filters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        facets: {
+          type: 'object',
+          additionalProperties: { type: 'array', items: { type: 'string' } },
+          description: 'Facet key → values to select when the report opens, e.g. { "class_id": ["<id of a tagged class>"] }.',
+        },
+        datePreset: { type: 'string', description: 'The window the report opens on: last_7d, last_30d, last_90d, this_month, this_year, all.' },
+      },
+      description: 'OPTIONAL initial filter selection. Use it to point the report at a tagged entity through its facet instead of baking the id into every widget.',
+    },
     new_report: {
       type: 'boolean',
       description:
@@ -222,6 +236,7 @@ export function createReportTool(
           entity?: { kind?: string; id?: string }
           prompt?: string
           new_report?: boolean
+          filters?: { facets?: Record<string, string[]>; datePreset?: string }
         }
         const title = a.title?.trim() || 'Untitled report'
 
@@ -282,6 +297,11 @@ export function createReportTool(
           })
         }
         if (facets) report.facets = facets
+        if (a.filters) {
+          const sel = mergeSelection(report.filters, a.filters.facets, a.filters.datePreset, report.facets as FacetSpec[] | undefined)
+          if ('error' in sel) return ok({ ok: false, error: sel.error })
+          report.filters = sel.value
+        }
 
         // Persist BEFORE opening when the host stores reports: the agent's
         // reply carries a route, and a route to a report that was never saved
