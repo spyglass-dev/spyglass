@@ -18,12 +18,37 @@ pub use run::{assemble_run, plan_run, JsonRow, PrevWindow, RunPlan};
 #[cfg(feature = "postgres")]
 pub mod postgres;
 
+/// The server's message (and detail/hint when present) for a database error,
+/// else the client error's own text.
+#[cfg(feature = "postgres")]
+pub fn postgres_detail(err: &tokio_postgres::Error) -> String {
+    match err.as_db_error() {
+        Some(db) => {
+            let mut out = db.message().to_string();
+            if let Some(detail) = db.detail() {
+                out.push_str(" — ");
+                out.push_str(detail);
+            }
+            if let Some(hint) = db.hint() {
+                out.push_str(" (hint: ");
+                out.push_str(hint);
+                out.push(')');
+            }
+            out
+        }
+        None => err.to_string(),
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
     #[error(transparent)]
     Compile(#[from] CompileError),
+    /// Postgres's own message, not tokio-postgres's Display: that reads just
+    /// "db error" for every server-side failure, which tells neither a person
+    /// nor an agent what to fix.
     #[cfg(feature = "postgres")]
-    #[error("postgres error: {0}")]
+    #[error("postgres error: {}", postgres_detail(.0))]
     Postgres(#[from] tokio_postgres::Error),
     #[cfg(feature = "clickhouse")]
     #[error("clickhouse transport error: {0}")]
