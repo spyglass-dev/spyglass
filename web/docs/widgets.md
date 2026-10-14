@@ -399,6 +399,37 @@ skill teaches an agent to: discover the cubes, run scoped queries via the
 endpoint, map each result into a widget, and save the report doc — never pasting
 raw data into chat.
 
+`buildReportTools(host, ctx, config)` gives the agent `get_report`,
+`create_report`, `add_report_widget`, `edit_report_widget`,
+`remove_report_widget`, `move_report_widget`, `set_report_filters`,
+`rename_report`, and, with the context to support them, `explore_data`,
+`find_reference_queries` and `add_report_view`. Three behaviours keep an
+agent honest:
+
+- **Every build and edit check-runs what it placed.** With `ctx.runQuery`,
+  the tool resolves each new or changed widget the way the canvas will (pass
+  `ctx.cubeCaps` so the report's date window and facets apply) and returns
+  `needs_fix` for any widget that failed or came back empty, including a chart
+  whose every value is zero. The agent fixes them in the same turn instead of
+  announcing a report that shows "No data".
+- **A follow-up edits; it does not rebuild.** `create_report` refuses while a
+  report with widgets is open, and points at the edit tools. Pass
+  `new_report: true` only when the reader asked for a separate report.
+- **Filters are selected, not baked in.** `create_report({ filters })` and
+  `set_report_filters({ selected, datePreset })` pick facet values and the
+  window, so a tagged class or workspace scopes the report through its filter
+  bar.
+
+Without `config.save`, `create_report` opens an unsaved draft and says so
+(`saved: false`); the host saves when the reader does. Wrap the host's query
+runner in `withRetry(runQuery)` to ride out a busy server (408/429/502/503/504,
+timeouts, dropped connections) without retrying a query that is simply wrong.
+
+Example queries ride on `/meta`: declare `examples` (`{ id, asks, query,
+means?, widget? }`) and `anti_examples` on a cube, and `find_reference_queries`
+retrieves them for the agent. The engine refuses to load a model whose example
+names a member it does not declare.
+
 ## Studio
 
 **Studio** is the Spyglass UI — a React/Vite app that talks to spyglass-server
