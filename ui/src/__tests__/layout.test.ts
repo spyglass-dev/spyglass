@@ -27,11 +27,23 @@ describe('planGrid', () => {
     ])
   })
 
-  it('fills a short row by widening its widest chart', () => {
+  it('never lays a chart out at one column', () => {
     expect(planGrid([c(2), c(1)])).toEqual([
-      { kind: 'single', index: 0, w: 3 },
-      { kind: 'single', index: 1, w: 1 },
+      { kind: 'single', index: 0, w: 2 },
+      { kind: 'single', index: 1, w: 2 },
     ])
+  })
+
+  it('a chart, a metric and a one-column chart wrap instead of squeezing', () => {
+    expect(planGrid([c(2), m(1), c(1)])).toEqual([
+      { kind: 'single', index: 0, w: 3 },
+      { kind: 'single', index: 1, w: 1, compact: true },
+      { kind: 'single', index: 2, w: 4 },
+    ])
+  })
+
+  it('fills a short row by widening its widest chart', () => {
+    expect(planGrid([c(3)])).toEqual([{ kind: 'single', index: 0, w: 4 }])
   })
 
   it('keeps order and starts a new row when the next widget does not fit', () => {

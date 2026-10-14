@@ -12,6 +12,8 @@
  *   the spare columns to its widest non-metric widget, so a report never has a
  *   hole on the right.
  * - **Two metrics alone share the row**, two columns each.
+ * - **A chart or table is at least two columns wide.** At one column it is
+ *   unreadable; only a metric tile is that narrow.
  *
  * Pure: indexes in, cells out. The renderer still owns every widget by its
  * index, so editing, removal and drill address the same widget as before.
@@ -31,7 +33,12 @@ export type LayoutCell =
   | { kind: 'stack'; indices: number[]; w: number }
 
 const clamp = (w: number) => Math.max(1, Math.min(4, Math.round(w)))
-const widthOf = (item: LayoutItem) => clamp(item.w ?? (item.metric ? 1 : 4))
+/** A chart or table is never narrower than two columns: at one column its
+ *  title wraps word by word and the plot is a sliver. Only metrics go to one. */
+const widthOf = (item: LayoutItem) => {
+  const w = clamp(item.w ?? (item.metric ? 1 : 4))
+  return item.metric ? w : Math.max(2, w)
+}
 
 /** Split the widgets into rows of at most four columns, in order. */
 function rowsOf(items: LayoutItem[]): number[][] {
