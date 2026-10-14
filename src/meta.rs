@@ -32,6 +32,12 @@ pub struct CubeMeta {
     /// Named predicates the cube declares — name + description, never SQL.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub segments: Vec<SegmentMeta>,
+    /// Worked example queries, as authored (see `Cube::examples`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub examples: Vec<serde_json::Value>,
+    /// Wrong-choice examples, as authored (see `Cube::anti_examples`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub anti_examples: Vec<serde_json::Value>,
 }
 
 /// A segment in the public catalog: what it's called and what it means —
@@ -177,6 +183,8 @@ impl Model {
                     joins,
                     drill_members: cube.drill_members.clone(),
                     segments,
+                    examples: cube.examples.clone(),
+                    anti_examples: cube.anti_examples.clone(),
                 }
             })
             .collect();
