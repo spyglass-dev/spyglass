@@ -32,6 +32,8 @@ const runQuery = vi.fn(async (q: WidgetQuery) => {
   return res([{ [m]: 3 }])
 })
 const bound = (measure: string, title: string) => ({ type: 'bound', as: 'metric', title, query: { measures: [measure] } })
+/** A table: a metric with no rows resolves to 0, which is a real answer. */
+const table = (measure: string, title: string) => ({ type: 'bound', as: 'table', title, query: { measures: [measure], dimensions: ['X.name'] } })
 
 describe('create_report check-runs every widget it places', () => {
   it('names failing and empty widgets in needs_fix, and their outcomes in state', async () => {
@@ -39,7 +41,7 @@ describe('create_report check-runs every widget it places', () => {
     const tools = buildReportTools(host, { runQuery })
     const out = await call(byName(tools, 'create_report'), {
       title: 'T',
-      widgets: [bound('Good.count', 'Good'), bound('Bad.count', 'Broken'), bound('Empty.count', 'Nothing')],
+      widgets: [bound('Good.count', 'Good'), bound('Bad.count', 'Broken'), table('Empty.count', 'Nothing')],
     })
     expect(out.ok).toBe(true)
     expect(out.needs_fix.map((f: any) => [f.title, f.status])).toEqual([
@@ -87,7 +89,7 @@ describe('edit and add check-run the widget they change', () => {
   it('add_report_widget flags an empty widget', async () => {
     const { host } = makeHost({ title: 'R', widgets: [] } as unknown as Report)
     const out = await call(byName(buildReportTools(host, { runQuery }), 'add_report_widget'), {
-      widget: bound('Empty.count', 'Nothing'),
+      widget: table('Empty.count', 'Nothing'),
     })
     expect(out.needs_fix?.[0]?.status).toBe('empty')
   })
@@ -197,7 +199,7 @@ describe('check-runs resolve the way the canvas does', () => {
   it("applies the report's date window, so a widget empty in the window is flagged", async () => {
     // Rows exist only when no date window is applied.
     const windowed = vi.fn(async (q: WidgetQuery) =>
-      q.timeDimensions?.some((td) => td.dateRange) ? res([]) : res([{ 'S.count': 4 }]),
+      q.filters?.some((f) => f.operator === 'gte') ? res([]) : res([{ 'S.count': 4 }]),
     )
     const caps = { S: { dims: [], timeField: 'created_at' } }
     const { host } = makeHost({ title: 'R', widgets: [], filters: { datePreset: 'last_30d' } } as unknown as Report)
@@ -205,7 +207,7 @@ describe('check-runs resolve the way the canvas does', () => {
       widget: { type: 'bound', as: 'table', title: 'Recent', query: { measures: ['S.count'], dimensions: ['S.name'] } },
     })
     expect(windowed).toHaveBeenCalled()
-    expect(windowed.mock.calls[0][0].timeDimensions?.[0]?.dateRange).toBeDefined()
+    expect(windowed.mock.calls[0][0].filters?.some((f) => f.member === 'S.created_at' && f.operator === 'gte')).toBe(true)
     expect(out.needs_fix?.[0]?.status).toBe('empty')
   })
 
