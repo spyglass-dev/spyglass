@@ -436,12 +436,9 @@ mod tests {
         );
         assert!(parse_tz(Some("Mars/Olympus")).is_err());
     }
-}
 
-#[cfg(test)]
-mod endpoint_tests {
-    use super::*;
     use crate::query::DateRange;
+
 
     fn now() -> DateTime<Utc> {
         DateTime::parse_from_rfc3339("2026-10-14T09:30:00Z").unwrap().with_timezone(&Utc)
