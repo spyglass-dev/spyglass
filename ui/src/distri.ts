@@ -5,7 +5,8 @@
  * `ReportHost` (open/update the report it's showing) and pairs these with a
  * reporting skill (see `spyglass/skills/reporting`).
  */
-import type { BoundWidget, Report, ReportWidget, ViewWidget } from './report'
+import type { BoundWidget, CubeCapsMap, Report, ReportWidget, ViewWidget } from './report'
+import type { MemberIndex } from './members'
 import { normalizeQuery, type CubeModelMeta, type QueryResultLite, type WidgetQuery } from './querybuilder'
 import { validateQuery } from './validate'
 import type { ViewRegistry } from './views'
@@ -123,6 +124,12 @@ const ok = (data: unknown) => [{ part_type: 'data' as const, data }]
 export interface ToolContext {
   meta?: CubeModelMeta
   runQuery?: (query: WidgetQuery) => Promise<QueryResultLite>
+  /** Which report filters reach which cube — the same caps the canvas uses.
+   *  With it, the check-run a build or edit does applies the report's date
+   *  window and facets exactly as the canvas will. */
+  cubeCaps?: CubeCapsMap
+  /** The model's titles and formats, for check-run results that read right. */
+  members?: MemberIndex
   /** Host view registry — enables `add_report_view`, validated against each
    *  view's manifest. */
   views?: ViewRegistry
@@ -165,7 +172,7 @@ export function withProvenance(widgets: ReportWidget[], prompt: string | undefin
  */
 async function checkPlaced(host: ReportHost, ctx: ToolContext, placed: ReportWidget[]) {
   if (!ctx.runQuery || !placed.length) return {}
-  const outcomes = await probeWidgets(host, placed, ctx.runQuery)
+  const outcomes = await probeWidgets(host, placed, ctx)
   const titles = new Map(placed.map((w) => [widgetId(w) ?? '', (w as { title?: string; label?: string }).title ?? (w as { label?: string }).label]))
   return needsFix(outcomes, titles) ?? {}
 }

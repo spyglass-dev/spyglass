@@ -144,7 +144,7 @@ export function editWidgetTool(host: ReportHost, ctx: ToolContext = {}): AgentTo
         forgetProbes(host, [keepId])
         if (ctx.runQuery) {
           const placed = widgets[found.index]
-          const outcomes = await probeWidgets(host, [placed], ctx.runQuery)
+          const outcomes = await probeWidgets(host, [placed], ctx)
           checked = needsFix(outcomes, new Map([[keepId, (placed as { title?: string }).title]])) ?? {}
         }
       }

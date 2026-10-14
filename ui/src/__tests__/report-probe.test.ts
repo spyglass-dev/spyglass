@@ -192,3 +192,29 @@ describe('filter selection', () => {
     expect(out.error).toMatch(/No facet "student_id"/)
   })
 })
+
+describe('check-runs resolve the way the canvas does', () => {
+  it("applies the report's date window, so a widget empty in the window is flagged", async () => {
+    // Rows exist only when no date window is applied.
+    const windowed = vi.fn(async (q: WidgetQuery) =>
+      q.timeDimensions?.some((td) => td.dateRange) ? res([]) : res([{ 'S.count': 4 }]),
+    )
+    const caps = { S: { dims: [], timeField: 'created_at' } }
+    const { host } = makeHost({ title: 'R', widgets: [], filters: { datePreset: 'last_30d' } } as unknown as Report)
+    const out = await call(byName(buildReportTools(host, { runQuery: windowed, cubeCaps: caps as never }), 'add_report_widget'), {
+      widget: { type: 'bound', as: 'table', title: 'Recent', query: { measures: ['S.count'], dimensions: ['S.name'] } },
+    })
+    expect(windowed).toHaveBeenCalled()
+    expect(windowed.mock.calls[0][0].timeDimensions?.[0]?.dateRange).toBeDefined()
+    expect(out.needs_fix?.[0]?.status).toBe('empty')
+  })
+
+  it('counts a chart whose every value is zero as empty, with a note', async () => {
+    const zeros = vi.fn(async () => res([{ 'S.day': '2026-10-01', 'S.count': 0 }, { 'S.day': '2026-10-02', 'S.count': 0 }]))
+    const { host } = makeHost({ title: 'R', widgets: [] } as unknown as Report)
+    const out = await call(byName(buildReportTools(host, { runQuery: zeros }), 'add_report_widget'), {
+      widget: { type: 'bound', as: 'chart', mark: 'line', title: 'Flat', x: 'S.day', y: 'S.count', query: { measures: ['S.count'], dimensions: ['S.day'] } },
+    })
+    expect(out.needs_fix?.[0]).toMatchObject({ status: 'empty', note: expect.stringMatching(/zero/) })
+  })
+})
