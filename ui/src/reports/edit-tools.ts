@@ -14,6 +14,7 @@ import type { AgentTool, ReportHost, ToolContext } from '../distri'
 import { isReportWidget, stateOf, validateWidgetQueries, withProvenance } from '../distri'
 import { FILTER_SPEC_SCHEMA, validateFilterSpec } from '../report.schema'
 import { checkFacetKeys, warnBakedDateRange } from './guards'
+import { forgetProbes, needsFix, probeWidgets } from './probe'
 import { resolveWidget, widgetId, withWidgetIds } from './session'
 import type { FacetSpec, Report, ReportWidget } from '../report'
 
@@ -112,7 +113,16 @@ export function editWidgetTool(host: ReportHost, ctx: ToolContext = {}): AgentTo
         idx === found.index ? ({ ...replacement, id: keepId } as ReportWidget) : w,
       )
       host.setReport({ ...open.report, widgets })
-      return ok({ ok: true, id: keepId, ...(warning ? { warning } : {}), state: stateOf(host) })
+      let checked = {}
+      if (keepId) {
+        forgetProbes(host, [keepId])
+        if (ctx.runQuery) {
+          const placed = widgets[found.index]
+          const outcomes = await probeWidgets(host, [placed], ctx.runQuery)
+          checked = needsFix(outcomes, new Map([[keepId, (placed as { title?: string }).title]])) ?? {}
+        }
+      }
+      return ok({ ok: true, id: keepId, ...(warning ? { warning } : {}), ...checked, state: stateOf(host) })
     },
   }
 }
@@ -135,8 +145,10 @@ export function removeWidgetTool(host: ReportHost): AgentTool {
       if (!open) return ok(NOTHING_OPEN)
       const found = resolveWidget(open.widgets, (input ?? {}) as { id?: string; index?: number })
       if ('error' in found) return ok({ ok: false, error: found.error, state: stateOf(host) })
+      const removedId = widgetId(open.widgets[found.index])
       const widgets = open.widgets.filter((_, idx) => idx !== found.index)
       host.setReport({ ...open.report, widgets })
+      if (removedId) forgetProbes(host, [removedId])
       return ok({ ok: true, state: stateOf(host) })
     },
   }
