@@ -110,11 +110,14 @@ describe('explore_data', () => {
     sql: 'select …',
   }
 
-  it('returns a compact summary, capped rows, with the SQL', async () => {
+  it('returns a compact summary with capped rows, and the SQL only when asked', async () => {
     const tool = exploreDataTool({ meta: META, runQuery: async () => result })
     const [out] = await tool.handler({ query: { measures: ['Payments.revenue'] } })
-    expect(out.data).toMatchObject({ ok: true, row_count: 30, total: 312, sql: 'select …' })
+    expect(out.data).toMatchObject({ ok: true, row_count: 30, total: 312 })
+    expect((out.data as { sql?: string }).sql).toBeUndefined()
     expect((out.data as { rows: unknown[] }).rows.length).toBe(EXPLORE_ROW_CAP)
+    const [debug] = await tool.handler({ query: { measures: ['Payments.revenue'] }, show_sql: true })
+    expect((debug.data as { sql?: string }).sql).toBe('select …')
   })
 
   it('returns { ok:false, error, suggestions } for a bad member — repairable', async () => {

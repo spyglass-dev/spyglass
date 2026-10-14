@@ -220,3 +220,16 @@ describe('check-runs resolve the way the canvas does', () => {
     expect(out.needs_fix?.[0]).toMatchObject({ status: 'empty', note: expect.stringMatching(/zero/) })
   })
 })
+
+describe('explore_data stays compact', () => {
+  it('omits the compiled SQL unless asked', async () => {
+    const withSql = vi.fn(async () => ({ columns: [], rows: [{ a: 1 }], sql: 'select very long sql' }) as unknown as QueryResultLite)
+    const { host } = makeHost()
+    const explore = byName(buildReportTools(host, { runQuery: withSql }), 'explore_data')
+    const plain = await call(explore, { query: { measures: ['A.count'] } })
+    expect(plain.ok).toBe(true)
+    expect(plain.sql).toBeUndefined()
+    const debug = await call(explore, { query: { measures: ['A.count'] }, show_sql: true })
+    expect(debug.sql).toBe('select very long sql')
+  })
+})

@@ -426,15 +426,18 @@ export function exploreDataTool(ctx: ToolContext): AgentTool {
     autoExecute: true,
     name: 'explore_data',
     description:
-      'Run a cube query and return a compact summary (columns, row count, total, first rows, compiled SQL). ALWAYS look at data with this before building a widget on it. Invalid members return { ok: false, error, suggestions } — repair and retry.',
+      'Run a cube query and return a compact summary (columns, row count, total, first rows). ALWAYS look at data with this before building a widget on it. Invalid members return { ok: false, error, suggestions } — repair and retry.',
     parameters: {
       type: 'object',
       additionalProperties: false,
-      properties: { query: { type: 'object', description: 'A cube query (same shape as a bound widget query).' } },
+      properties: {
+        query: { type: 'object', description: 'A cube query (same shape as a bound widget query).' },
+        show_sql: { type: 'boolean', description: 'Also return the compiled SQL. Only when debugging a wrong number.' },
+      },
       required: ['query'],
     },
     handler: async (input) => {
-      const a = (input ?? {}) as { query?: WidgetQuery }
+      const a = (input ?? {}) as { query?: WidgetQuery; show_sql?: boolean }
       if (!a.query || typeof a.query !== 'object') return ok({ ok: false, error: 'Provide a `query` object.' })
       if (ctx.meta) {
         const v = validateQuery(a.query, ctx.meta)
@@ -450,7 +453,10 @@ export function exploreDataTool(ctx: ToolContext): AgentTool {
           total: result.total,
           truncated_at: result.truncated_at,
           rows: result.rows.slice(0, EXPLORE_ROW_CAP),
-          sql: result.sql,
+          // The compiled SQL is about as long as the rows and the agent cannot
+          // act on it; carried in every later call of the conversation, it
+          // pushed long report sessions into model timeouts. Opt-in only.
+          ...(a.show_sql ? { sql: result.sql } : {}),
         })
       } catch (e) {
         return ok({ ok: false, error: e instanceof Error ? e.message : String(e) })
