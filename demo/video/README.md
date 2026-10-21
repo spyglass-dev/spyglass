@@ -8,11 +8,11 @@ cut from one continuous take of the demo.
 pnpm --filter @spyglass/demo dev                       # http://127.0.0.1:5198
 
 # 2. Record: one take, the step marks, and the brand mark (needs Playwright)
-node demo/video/record.mjs ~/spyglass-shots/video/raw
+node demo/video/record.mjs ~/.canopy/projects/spyglass/evidence/video/raw
 
 # 3. Compose: title card, captioned clips, end card, music (needs ffmpeg + Inter)
 python3 demo/video/compose.py demo/video/video.json
-cp ~/spyglass-shots/video/spyglass-demo.mp4 web/static/video/
+cp ~/.canopy/projects/spyglass/evidence/video/spyglass-demo.mp4 web/static/video/
 ```
 
 `record.mjs` writes `take.webm`, `marks.json` (seconds where each step starts)
