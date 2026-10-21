@@ -13,7 +13,7 @@ import { mkdirSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
 const APP = process.env.DEMO_URL || 'http://127.0.0.1:5198'
-const OUT = process.argv[2] ?? `${homedir()}/spyglass-shots/video/raw`
+const OUT = process.argv[2] ?? `${homedir()}/.canopy/projects/spyglass/evidence/video/raw`
 const SIZE = { width: 1280, height: 800 }
 const QUESTION = 'Which channels convert best, and how does mobile compare to desktop?'
 mkdirSync(OUT, { recursive: true })

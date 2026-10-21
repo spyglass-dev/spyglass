@@ -1,6 +1,6 @@
 {
-  "raw": "~/spyglass-shots/video/raw",
-  "output": "~/spyglass-shots/video/spyglass-demo.mp4",
+  "raw": "~/.canopy/projects/spyglass/evidence/video/raw",
+  "output": "~/.canopy/projects/spyglass/evidence/video/spyglass-demo.mp4",
   "title": "Ask your data. Get a report.",
   "subtitle": "A semantic layer in Rust, running in your browser",
   "end": "spyglass-dev.github.io/spyglass",
